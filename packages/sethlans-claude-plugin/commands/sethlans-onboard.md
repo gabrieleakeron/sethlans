@@ -37,26 +37,76 @@ Do not write `~/.claude/.mcp.json` directly; the postinstall script owns that fi
 
 Report the final status (agent-lsp present/missing, serena present/missing).
 
-## 0-C. Per-project MCP configuration
-Read `~/.claude/sethlans-config.json` (written by `sethlans setup`):
+## 0-C. Per-project integration MCPs (tickets · docs · code quality)
+The three integration slots — **tickets**, **docs**, **code quality** — are configured **per
+project**, and the provider for a slot may differ from the global default. The global
+`~/.claude/sethlans-config.json` (`mcps.{ticket,docs,codeQuality}`, written by `sethlans setup`)
+only supplies the **default suggestion**; this step lets the user pick a per-project provider,
+**wire** the MCP-based ones scoped to the project, and **record** the non-MCP ones as pointers the
+subagents act on. Everything here is **optional, best-effort, never blocking**: if the user
+declines a slot, skip it silently — the subagents degrade gracefully (the reviewer omits Code
+Health, the PO works from descriptions written on the spot).
 
-1. **If `mcps.ticket` is set** (e.g. `"atlassian"`, `"linear"`, `"github"`):
-   - Ask: *"Which ticket project is the reference for this workspace? (e.g. Jira project key: NAU)"*
-   - Save the answer in `.claude/project-profile.yaml` under `roles.seth-product-owner.jira_project`.
+Run the loop below **once per slot**. Read `~/.claude/sethlans-config.json` first (if present) to
+seed the default provider per slot; if it is missing or the key is `null`, just ask directly.
 
-2. **If `mcps.docs` is set** (e.g. `"atlassian"`, `"notion"`):
-   - Ask: *"Which documentation space is the reference for this workspace? (e.g. Confluence space key or Notion URL)"*
-   - Save under `roles.seth-product-owner.docs_space` and `roles.seth-architect.docs_space`.
+### Step 1 — choose the provider for this project
+Show the slot's known providers (default = the global `mcps.<slot>` when set) and let the user pick
+or confirm. Record the choice under `mcps.<slot>` in `.claude/project-profile.yaml` (this is the
+per-project override of the global default):
 
-3. **If `mcps.codeQuality` is set** (e.g. `"codescene"`, `"sonarqube"`, `"codacy"`):
-   - Ask: *"Which project/repository is configured in your code-quality MCP for this workspace? (e.g. repo name on CodeScene)"*
-   - Save under `roles.seth-reviewer.codeQuality_project`.
+| Slot | Known providers |
+|---|---|
+| ticket | `atlassian` · `linear` · `github` |
+| docs | `atlassian` · `notion` · `github-wiki` |
+| code quality | `codescene` · `sonarqube` · `codacy` |
 
-If `~/.claude/sethlans-config.json` does not exist or the relevant key is `null`, skip that
-question silently.
+All code-quality providers (incl. **`codacy`**) are MCP servers (Step 2a). The official **Codacy**
+MCP also runs **local** analysis through its `codacy_cli_analyze` tool — so a separate "local
+Codacy" provider is **not** needed; pick `codacy`. The only **non-MCP** provider is **`github-wiki`**
+(docs, Step 2b).
 
-The `.claude/project-profile.yaml` file will be read in step 2 to populate the board's
-`project.config` — this is how the per-role pointers flow from local config into the board.
+### Step 2a — MCP-based provider → resolve, then offer to wire
+For `atlassian` / `linear` / `github` / `notion` / `codescene` / `sonarqube` / `codacy`:
+- **Resolve** whether the server's `mcp__<server>__*` tools are already wired, in the order used by
+  `~/.claude/commands/sethlans-healthcheck.md` §3: project `./.mcp.json` → the active project's
+  block in `~/.claude.json` → the global block (fallback). If it resolves only globally, note it
+  is *global-only* (not scoped to this project).
+- If it is **not wired at project scope**, ask: *"Wire `<provider>` for this project now? [y/n]"*.
+  On yes, register it **project-scoped** with `claude mcp add --scope project …` — never by
+  hand-editing `~/.claude.json`. Use the recipes already documented in
+  `~/.claude/code-quality-protocol.md` (code-quality vendors) and
+  `~/.claude/commands/sethlans-healthcheck.md` §3a (Atlassian http transport). For **GitHub**, use
+  the recipe consistent with the `sethlans setup` registry
+  (`claude mcp add --scope project github -e GITHUB_TOKEN=<token> -- npx -y @modelcontextprotocol/server-github@latest`).
+  For **Codacy**, use the official MCP
+  (`claude mcp add --scope project codacy -e CODACY_ACCOUNT_TOKEN=<token> -- npx -y @codacy/codacy-mcp@latest`);
+  its `codacy_cli_analyze` tool does local analysis (the account token is required even for that,
+  and on **Windows** the local path needs **WSL**). Pass URLs/tokens via **env vars only — never
+  hardcode secrets**.
+- Then ask: *"Also add `<provider>` to the global config (available in every project)? [y/n]"* — on
+  yes, register it again with `-s user`. Remind the user to restart Claude Code (or reload MCP
+  servers) so the new tools load.
+
+### Step 2b — non-MCP provider → record the pointer (no `claude mcp add`)
+- **`github-wiki`** (docs): the project's GitHub wiki is a git repo (`<repo>.wiki.git`), not an
+  MCP. Ask for the wiki repo URL (and, optionally, a local clone path). Record under
+  `roles.seth-product-owner.docs` and `roles.seth-architect.docs` as
+  `{ provider: github-wiki, wiki_repo: <url>, local_path: <optional> }`.
+
+### Step 3 — record the per-role pointer
+Ask the slot's identifier and save it into `.claude/project-profile.yaml`:
+- **ticket** → `roles.seth-product-owner.ticket` = `{ provider, repo: <owner>/<repo>, project: <GitHub Project name / Jira key / Linear team> }`.
+  *(GitHub example: `repo: <owner>/sethlans`, `project: sethlans-project`.)* The legacy flat key
+  `roles.seth-product-owner.jira_project` stays valid as the `provider: atlassian` shorthand.
+- **docs** → `roles.seth-product-owner.docs` **and** `roles.seth-architect.docs` (Confluence space,
+  Notion URL, or the `github-wiki` block from Step 2b). Legacy `docs_space` stays valid.
+- **code quality** → `roles.seth-reviewer.codeQuality` = `{ provider, project: <repo on the MCP> }`
+  (for Codacy, the repo as configured on the account; local runs go through `codacy_cli_analyze`).
+  Legacy flat key `codeQuality_project` stays valid.
+
+These per-role pointers flow into the board's `project.config` in step 2 (unchanged mechanism) —
+this is how they reach the subagents.
 
 ## 0. Sethlans Board healthcheck
 - `GET $base/state`. If it does NOT respond: warn the board is down and **stop** (the real

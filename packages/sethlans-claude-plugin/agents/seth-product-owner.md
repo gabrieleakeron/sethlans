@@ -91,6 +91,13 @@ For the context of the workspace (domain, repos, rules) refer to the `CLAUDE.md`
 of the current project, if present. The MCP Atlassian (or GitHub/Notion MCPs, depending on the
 project's configured sources) must be authenticated at runtime if required.
 
+**Read the per-project source pointers from `project.config`** (set by `/sethlans-onboard` §0-C):
+`roles.seth-product-owner.ticket` gives the ticket `provider` + `repo` + `project` (e.g. the
+**GitHub Project** name like `sethlans-project`), and `roles.seth-product-owner.docs` gives the
+docs target — a Confluence space, a Notion URL, or a **`github-wiki`** block (`wiki_repo` +
+optional `local_path`, edited as a git repo). Use these when set rather than assuming the source;
+fall back to discovery only when the pointer is absent.
+
 ## Constraints
 - You do not write production code; you do not create tasks (the seth-architect creates them downstream).
 - Do not expose secrets taken from Jira/Confluence/Notion in the logs or in the public md.

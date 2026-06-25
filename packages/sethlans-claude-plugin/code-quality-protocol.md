@@ -1,9 +1,10 @@
-# Code Quality Protocol — optional Code Health / static-analysis MCP
+# Code Quality Protocol — optional Code Health / static analysis
 
 This document defines the **convention** by which the Sethlans subagents (primarily the
 **seth-reviewer**) consume an **optional code-quality MCP server**: Code Health / static-analysis
 tools such as **CodeScene**, **SonarQube/SonarCloud**, **Codacy**, **Qodana** or **Semgrep**,
-each of which ships its own MCP server.
+each of which ships its own MCP server. Some (notably **Codacy**, via `codacy_cli_analyze`) also
+run analysis **locally** through the MCP — see *Local analysis through an MCP* below.
 
 It is **cross-project**: it lives in the global home (`~/.claude/`) and does not depend on any
 specific workspace. It is the counterpart of [`board-protocol.md`](board-protocol.md) for the
@@ -63,10 +64,10 @@ claude mcp add sonarqube -s user \
   -e SONARQUBE_TOKEN=<token> \
   -- <sonar-mcp-launch-command>
 
-# Codacy (quality + security)
+# Codacy (quality + security; also local analysis via codacy_cli_analyze)
 claude mcp add codacy -s user \
   -e CODACY_ACCOUNT_TOKEN=<token> \
-  -- <codacy-mcp-launch-command>
+  -- npx -y @codacy/codacy-mcp@latest
 ```
 
 Equivalent project-scoped `.mcp.json` entry (committed to the repo, secrets via env):
@@ -88,3 +89,21 @@ Equivalent project-scoped `.mcp.json` entry (committed to the repo, secrets via 
 The Sethlans `plugin.json` intentionally does **not** ship a code-quality server in its
 `mcpServers` (it would fail to connect for users without the vendor/token). Enable it per-user
 (`claude mcp add`) or per-project (`.mcp.json`) using the templates above.
+
+## Local analysis through an MCP — Codacy `codacy_cli_analyze`
+
+The official **Codacy** MCP (`@codacy/codacy-mcp`) exposes a `codacy_cli_analyze` tool that runs
+analysis **locally** via the Codacy CLI v2 (the MCP installs it on first use), returning results
+without waiting on cloud processing. This stays within the MCP convention — it is discovered as
+`mcp__codacy__*` like any other code-quality MCP — so the seth-reviewer needs no special handling:
+when present, call `codacy_cli_analyze` scoped to the diff/PR under review.
+
+Caveats (same best-effort, never-blocking spirit):
+- The account token (`CODACY_ACCOUNT_TOKEN`) is **required even for local analysis** — the CLI
+  initializes with it. There is no token-free MCP path.
+- On **Windows** the local CLI runs **only under WSL**. If it can't run, fall back to the MCP's
+  cloud tools, or flag that Code Health could not be retrieved — never block the review.
+
+> A standalone, account-free option still exists outside the MCP: this repo's `docker/codacy/`
+> analyzer (image `codacy/codacy-analysis-cli`, `analyze.ps1` / `analyze.sh` → SARIF in `results/`)
+> for manual ad-hoc runs. It is not wired into the reviewer flow.

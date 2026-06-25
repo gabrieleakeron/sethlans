@@ -105,16 +105,19 @@ export const CODE_QUALITY_PROVIDERS = [
     })
   },
   {
+    // Official Codacy MCP. Also exposes `codacy_cli_analyze` for LOCAL analysis
+    // (runs the Codacy CLI v2); on Windows that path requires WSL. The account
+    // token is required even for local analysis (the CLI initializes with it).
     id: 'codacy',
     label: 'Codacy',
     mcpName: 'codacy',
     envVars: [
-      { key: 'CODACY_API_TOKEN', prompt: 'Codacy API token: ' }
+      { key: 'CODACY_ACCOUNT_TOKEN', prompt: 'Codacy account token: ' }
     ],
-    command: ['npx', '-y', '@codacy/mcp@latest'],
+    command: ['npx', '-y', '@codacy/codacy-mcp@latest'],
     test: envVars => ({
       url: 'https://app.codacy.com/api/v3/user',
-      headers: { 'api-token': envVars.CODACY_API_TOKEN }
+      headers: { 'api-token': envVars.CODACY_ACCOUNT_TOKEN }
     })
   }
 ]

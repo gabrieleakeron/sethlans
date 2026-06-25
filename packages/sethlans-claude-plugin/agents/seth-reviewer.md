@@ -47,6 +47,12 @@ scoped to the diff/PR under review. Follow `~/.claude/code-quality-protocol.md`:
   (or a BLOCKER on a severe regression); failing quality-gate on new code & security findings →
   BLOCKERS. Append a short **Code Health** subsection citing the tool used and the headline metric.
 
+**Local analysis (Codacy).** The Codacy MCP also runs analysis **locally** via its
+`codacy_cli_analyze` tool — call it scoped to the **specific nested repo under review** (never the
+workspace root) for immediate, diff-scoped findings without waiting on cloud processing. On
+**Windows** this local path needs **WSL**; if it can't run, fall back to the cloud tools or flag
+that Code Health could not be retrieved. Same best-effort rule — never block.
+
 ## Project knowledge — read before working
 At the **start** of a task on a project, best-effort read the **project profile** and your **role's knowledge card(s)** from Sethlans Board before acting, so you honour the project spec (see the *Consumption rule* in `~/.claude/board-protocol.md`):
 - profile: `sethlans_board_request` GET `/projects` → your project's `md` (mirror of `CLAUDE.md`) + `config` (per-role pointers);
