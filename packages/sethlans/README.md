@@ -8,7 +8,7 @@ system that runs the PO → UX → architect → dev → review/test pipeline.
 Download the latest release from [GitHub Releases](https://github.com/GabrieleConsonni/sethlans/releases):
 
 ```bash
-npm install -g https://github.com/GabrieleConsonni/sethlans/releases/download/vX.Y.Z/sethlans-X.Y.Z.tgz
+npm install -g https://github.com/gabrieleakeron/sethlans/releases/download/vX.Y.Z/sethlans-X.Y.Z.tgz
 ```
 
 ## Usage

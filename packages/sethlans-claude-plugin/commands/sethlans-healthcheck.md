@@ -164,21 +164,22 @@ A missing slot is **not** an error — the subagents degrade gracefully (the rev
 Health section; the PO works from descriptions written on the spot). Only offer if the user wants
 it. The fix depends on **what** is missing:
 
-- **Server not wired globally** → ask *"Wire `<provider>` globally now? [y/n]"*. On yes, register it
-  at **user scope** (`claude mcp add -s user`) — **never `--scope project`**, never hand-edit
-  `~/.claude.json`. Pass tokens via `-e` env vars only:
-  - **Atlassian (tickets + docs)** —
-    `claude mcp add atlassian -s user -e ATLASSIAN_BASE_URL=<url> -e ATLASSIAN_EMAIL=<email> -e ATLASSIAN_API_TOKEN=<token> -- npx -y @atlassian/mcp@latest`.
-  - **GitHub (tickets)** —
-    `claude mcp add github -s user -e GITHUB_TOKEN=<token> -- npx -y @modelcontextprotocol/server-github@latest`.
-  - **Codacy (code quality)** —
-    `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN=<token> -- npx -y @codacy/codacy-mcp@latest`
-    (its `codacy_cli_analyze` does local analysis; needs WSL on Windows).
-  - **CodeScene / SonarQube** — use the vendor template in
-    [`code-quality-protocol.md`](code-quality-protocol.md) (URL/token via env vars). CodeScene runs
-    its MCP via the `codescene/codescene-mcp` Docker image.
-  Remind the user to restart Claude Code (or reload MCP servers) so the new tools load. This is the
-  same wiring `/sethlans-onboard` §0-C performs — running onboard also fixes it.
+- **Server not wired globally** → ask *"Wire `<provider>` globally now? [y/n]"*. On yes, run the
+  **turnkey token walk-through** — the user supplies only the token (as an env var), never types
+  `claude mcp add`. Follow the **golden rule** (see [`code-quality-protocol.md`](code-quality-protocol.md)):
+  1. Tell the user where to create the token (per the provider catalog in `/sethlans-onboard` §0-C),
+     then print the one command they run to store it — Windows `setx <VAR> "<token>"`, macOS/Linux
+     `export <VAR>="<token>"` in their shell profile. Wait for confirmation.
+  2. **You** register it at **user scope** (`claude mcp add -s user`) with the **literal placeholder**
+     `'${VAR}'` (single-quoted) — **never `--scope project`**, never hand-edit `~/.claude.json`,
+     **never inline the token value**. Only non-secret bits (instance URL, email) go inline on `-e`.
+     The env var name per provider:
+     atlassian → `ATLASSIAN_API_TOKEN` · github → `GITHUB_TOKEN` · linear → `LINEAR_API_KEY` ·
+     notion → `NOTION_API_TOKEN` · codacy → `CODACY_ACCOUNT_TOKEN` · codescene → `CODESCENE_API_TOKEN` ·
+     sonarqube → `SONARQUBE_TOKEN`. (Codacy's `codacy_cli_analyze` does local analysis; needs WSL on
+     Windows. CodeScene runs its MCP via the `codescene/codescene-mcp` Docker image.)
+  Remind the user to **restart Claude Code and their terminal** so the env var resolves and the tools
+  load. This is the same wiring `/sethlans-onboard` §0-C performs — running onboard also fixes it.
 - **Project reference missing** (server wired, but no Jira key / space / repo / CQ project for this
   repo) → the fix is **`/sethlans-onboard`** (its §0-C records `slots.<slot>` and mirrors it to the
   board `project.config`). This is also the only fix for the non-MCP `github-wiki` pointer.

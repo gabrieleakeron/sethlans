@@ -41,54 +41,47 @@ omitted, no note is needed unless the tool was configured-but-unreachable.
 
 ## Configuration — wiring a code-quality MCP (adapt to your vendor)
 The slot is **user-configured**: nothing is shipped enabled by default, so the plugin works for
-everyone with zero extra setup. To enable it, register the vendor's MCP server with Claude Code.
-Pass the API URL/token via **environment variables** — never hardcode secrets.
+everyone with zero extra setup. The Sethlans flows (`sethlans setup` Step 3, `/sethlans-onboard`
+§0-C, `/sethlans-healthcheck` §3a) wire it **for** the user — the user never types `claude mcp add`.
 
-> The commands below are **illustrative templates**. Check each vendor's MCP documentation for
-> the exact package/command, transport (stdio vs remote), and required env vars.
+### The golden rule — token in an env var, registered as a `${PLACEHOLDER}`, never in a file
+A token is a **machine credential**, reused across every repo. It must **never** be written into
+`~/.claude.json`, `~/.claude/.mcp.json`, or a project's `.mcp.json` as a literal value — a token
+baked into a config file is a plaintext secret sitting on disk (and easily committed by accident).
 
-> `-s user` registers the server at the global ("user") scope — available in every project, not
-> just the one you happen to run the command from. Omit it (or use `-s project`) if you want a
-> per-project `.mcp.json` entry instead — see below.
+The turnkey contract, identical for every provider:
 
-```bash
-# CodeScene (Code Health, hotspots, behavioral code analysis)
-claude mcp add codescene -s user \
-  -e CODESCENE_API_URL=https://<your-codescene-host> \
-  -e CODESCENE_API_TOKEN=<token> \
-  -- <codescene-mcp-launch-command>
+1. **The user** stores the secret once, as a persistent **environment variable** named exactly as
+   the MCP expects (see the table). Windows: `setx CODACY_ACCOUNT_TOKEN "<token>"`. macOS/Linux:
+   add `export CODACY_ACCOUNT_TOKEN="<token>"` to `~/.zshrc` / `~/.bashrc`.
+2. **The Sethlans flow** registers the server with the **literal placeholder** `'${VAR}'`
+   (single-quoted so the shell does not expand it at registration time) — Claude Code resolves it
+   from the environment at server launch. The secret therefore never lands in any config file:
+   ```bash
+   claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN='${CODACY_ACCOUNT_TOKEN}' -- npx -y @codacy/codacy-mcp@latest
+   ```
+3. Because `setx` / a shell-profile `export` only affects **new** processes, the user must
+   **restart Claude Code (and their terminal)** after step 1 for the variable to resolve.
 
-# SonarQube / SonarCloud (quality gate, new-code issues, SAST)
-claude mcp add sonarqube -s user \
-  -e SONARQUBE_URL=https://<your-sonar-host> \
-  -e SONARQUBE_TOKEN=<token> \
-  -- <sonar-mcp-launch-command>
+> Non-secret connection bits (an instance URL, an account email) may be passed inline on `-e` —
+> only the **token/key** must go through the env-var placeholder.
 
-# Codacy (quality + security; also local analysis via codacy_cli_analyze)
-claude mcp add codacy -s user \
-  -e CODACY_ACCOUNT_TOKEN=<token> \
-  -- npx -y @codacy/codacy-mcp@latest
-```
+### Provider recipe table (code-quality slot)
+The flow picks the row for the chosen provider and walks the user through *create token → set env
+var → (tool registers)*. `<url>` is the vendor instance URL (non-secret, inline).
 
-Equivalent project-scoped `.mcp.json` entry (committed to the repo, secrets via env):
+| Provider | Env var (set via `setx`/`export`) | Where the user creates the token | Registration the flow runs |
+|---|---|---|---|
+| **codacy** | `CODACY_ACCOUNT_TOKEN` | Codacy → your avatar → **Account** → **Access Management** → **Create API token** (account token) | `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN='${CODACY_ACCOUNT_TOKEN}' -- npx -y @codacy/codacy-mcp@latest` |
+| **codescene** | `CODESCENE_API_TOKEN` | CodeScene → **User settings** → **API / Personal access tokens** → generate | `claude mcp add codescene -s user -e CODESCENE_API_URL=<url> -e CODESCENE_API_TOKEN='${CODESCENE_API_TOKEN}' -- docker run -i --rm -e CODESCENE_API_URL -e CODESCENE_API_TOKEN codescene/codescene-mcp` |
+| **sonarqube** | `SONARQUBE_TOKEN` | Sonar → **My Account** → **Security** → **Generate Tokens** | `claude mcp add sonarqube -s user -e SONARQUBE_URL=<url> -e SONARQUBE_TOKEN='${SONARQUBE_TOKEN}' -- <sonar-mcp-launch-command>` |
 
-```json
-{
-  "mcpServers": {
-    "codescene": {
-      "command": "<codescene-mcp-launch-command>",
-      "env": {
-        "CODESCENE_API_URL": "${CODESCENE_API_URL}",
-        "CODESCENE_API_TOKEN": "${CODESCENE_API_TOKEN}"
-      }
-    }
-  }
-}
-```
+> Commands are **current templates** — check the vendor's MCP docs for the exact package, transport
+> (stdio vs docker vs remote), and env vars; the **placeholder pattern stays the same** regardless.
 
 The Sethlans `plugin.json` intentionally does **not** ship a code-quality server in its
-`mcpServers` (it would fail to connect for users without the vendor/token). Enable it per-user
-(`claude mcp add`) or per-project (`.mcp.json`) using the templates above.
+`mcpServers` (it would fail to connect for users without the vendor/token). It is always wired
+on demand by the flows above, at **user scope**, following this golden rule.
 
 ## Local analysis through an MCP — Codacy `codacy_cli_analyze`
 

@@ -44,12 +44,19 @@ One rule governs the three integration slots — **tickets**, **docs**, **code q
 > project stores only the *reference*** — which Jira project / Confluence space / repo / Codacy or
 > CodeScene project to act on.
 
-A token is a **machine/user credential reused across every repo** — never project-scoped, never
-written into a file (always passed as a `-e` env var on registration). This step **populates the
-global servers on demand** as you onboard projects, and records the lightweight per-project
-references. Everything here is **optional, best-effort, never blocking**: if the user declines a
-slot, skip it silently — the subagents degrade gracefully (the reviewer omits Code Health, the PO
-works from descriptions written on the spot).
+A token is a **machine/user credential reused across every repo** — never project-scoped, and
+**never written into a config file as a literal value**. The golden rule (see
+`~/.claude/code-quality-protocol.md`): the **user** stores the secret once in an **environment
+variable** (`setx VAR "<token>"` on Windows; `export VAR="<token>"` in `~/.zshrc`/`~/.bashrc` on
+macOS/Linux), and **you** register the server with the literal placeholder `'${VAR}'` (single-quoted
+so the shell doesn't expand it) — Claude Code resolves it from the environment at launch, so the
+token never touches disk. This step **populates the global servers on demand** as you onboard
+projects, and records the lightweight per-project references. Everything here is **optional,
+best-effort, never blocking**: if the user declines a slot, skip it silently — the subagents
+degrade gracefully (the reviewer omits Code Health, the PO works from descriptions written on the spot).
+
+**The user only ever supplies three things per slot: the provider, the token (as an env var), and
+the project reference.** You do everything else — the user never types `claude mcp add`.
 
 Read `~/.claude/sethlans-config.json` first: `mcps.{ticket,docs,codeQuality}` records the **global
 default provider** per slot (this file is updated here, as onboards happen). Run the loop below
@@ -71,20 +78,35 @@ so no separate "local Codacy" provider is needed.
 ### Step 2 — ensure the provider's MCP is wired **globally** (`-s user`)
 Check whether the provider's `mcp__<server>__*` tools are loaded — i.e. it is registered at **user
 scope** in `~/.claude.json`. There is **only one scope to check**: global.
-- **Already wired** → nothing to do (the token is already there, shared by every repo).
-- **Not wired** → ask *"Wire `<provider>` globally now? [y/n]"*. On yes, register it **`-s user`** —
-  **never `--scope project`**, never hand-edit `~/.claude.json`. Pass URLs/tokens via **`-e` env
-  vars only — never hardcode secrets**. Recipes:
-  - **atlassian** — `claude mcp add atlassian -s user -e ATLASSIAN_BASE_URL=<url> -e ATLASSIAN_EMAIL=<email> -e ATLASSIAN_API_TOKEN=<token> -- npx -y @atlassian/mcp@latest`
-  - **github** — `claude mcp add github -s user -e GITHUB_TOKEN=<token> -- npx -y @modelcontextprotocol/server-github@latest`
-  - **linear** — `claude mcp add linear -s user -e LINEAR_API_KEY=<key> -- npx -y @linear/mcp@latest`
-  - **notion** — `claude mcp add notion -s user -e NOTION_API_TOKEN=<token> -- npx -y @modelcontextprotocol/server-notion@latest`
-  - **codescene · sonarqube · codacy** — use the vendor recipe in `~/.claude/code-quality-protocol.md`
-    (Codacy: `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN=<token> -- npx -y @codacy/codacy-mcp@latest`;
-    its `codacy_cli_analyze` does local analysis and needs **WSL** on Windows).
 
-  Then **record the global default** under `mcps.<slot>` in `~/.claude/sethlans-config.json`, and
-  remind the user to **restart Claude Code** (or reload MCP servers) so the new tools load.
+- **Already wired** → nothing to do (the env var is already set, shared by every repo).
+- **`github-wiki`** (docs) → no MCP, no token; skip to Step 3.
+- **Not wired** → run the **turnkey token walk-through**, never `claude mcp add` typed by the user:
+  1. Find the provider's row in the catalog below to get its **env var** and **token-creation path**.
+  2. Tell the user *exactly* where to create the token (the "create token" column), then print the
+     **one command they run** to store it — Windows `setx <VAR> "<token>"`, macOS/Linux
+     `export <VAR>="<token>"` appended to their shell profile. Wait for them to confirm it's set.
+  3. **You** then register the server `-s user` with the **literal placeholder** `'${VAR}'`
+     (single-quoted) — **never `--scope project`**, **never hand-edit `~/.claude.json`**, **never
+     inline the token value**. Non-secret bits (instance URL, email) may be inline on `-e`.
+  4. **Record the global default** under `mcps.<slot>` in `~/.claude/sethlans-config.json`, and tell
+     the user to **restart Claude Code and their terminal** so the new env var resolves and the
+     tools load.
+
+  **Provider catalog** (env var · where the user creates the token · the command *you* run):
+
+  | Provider | Slot(s) | Env var the user `setx`/`export`s | Where to create the token | Registration you run |
+  |---|---|---|---|---|
+  | **atlassian** | ticket + docs | `ATLASSIAN_API_TOKEN` | id.atlassian.com → **Security** → **API tokens** → **Create** | `claude mcp add atlassian -s user -e ATLASSIAN_BASE_URL=<url> -e ATLASSIAN_EMAIL=<email> -e ATLASSIAN_API_TOKEN='${ATLASSIAN_API_TOKEN}' -- npx -y @atlassian/mcp@latest` |
+  | **github** | ticket | `GITHUB_TOKEN` | github.com → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained** → **Generate** | `claude mcp add github -s user -e GITHUB_TOKEN='${GITHUB_TOKEN}' -- npx -y @modelcontextprotocol/server-github@latest` |
+  | **linear** | ticket | `LINEAR_API_KEY` | linear.app → **Settings** → **Security & access** → **Personal API keys** → **New key** | `claude mcp add linear -s user -e LINEAR_API_KEY='${LINEAR_API_KEY}' -- npx -y @linear/mcp@latest` |
+  | **notion** | docs | `NOTION_API_TOKEN` | notion.so/my-integrations → **New integration** → copy the secret | `claude mcp add notion -s user -e NOTION_API_TOKEN='${NOTION_API_TOKEN}' -- npx -y @modelcontextprotocol/server-notion@latest` |
+  | **codacy** | code quality | `CODACY_ACCOUNT_TOKEN` | Codacy → **Account** → **Access Management** → **Create API token** | `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN='${CODACY_ACCOUNT_TOKEN}' -- npx -y @codacy/codacy-mcp@latest` |
+  | **codescene** | code quality | `CODESCENE_API_TOKEN` | CodeScene → **User settings** → **API tokens** | `claude mcp add codescene -s user -e CODESCENE_API_URL=<url> -e CODESCENE_API_TOKEN='${CODESCENE_API_TOKEN}' -- docker run -i --rm -e CODESCENE_API_URL -e CODESCENE_API_TOKEN codescene/codescene-mcp` |
+  | **sonarqube** | code quality | `SONARQUBE_TOKEN` | Sonar → **My Account** → **Security** → **Generate Tokens** | `claude mcp add sonarqube -s user -e SONARQUBE_URL=<url> -e SONARQUBE_TOKEN='${SONARQUBE_TOKEN}' -- <sonar-mcp-launch-command>` |
+
+  The full code-quality catalog (CodeScene/SonarQube/Codacy, plus Codacy's `codacy_cli_analyze`
+  local analysis — needs **WSL** on Windows) lives in `~/.claude/code-quality-protocol.md`.
 
 ### Step 3 — record the per-project reference (no token, no server)
 Ask **only** for the slot's reference and save it into `.claude/project-profile.yaml` under `slots`
