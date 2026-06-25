@@ -63,11 +63,11 @@ docker volume create sethlans-board-data
 
 docker run -d --name sethlans-server \
   -v sethlans-board-data:/data -p 9955:9955 --restart unless-stopped \
-  gifsonick/sethlans-server:latest
+  gabrieleconsonni/sethlans-server:latest
 
 docker run -d --name sethlans-board \
   -p 5173:80 --restart unless-stopped \
-  gifsonick/sethlans-board:latest
+  gabrieleconsonni/sethlans-board:latest
 ```
 
 Interface → <http://localhost:5173> · API/docs → <http://localhost:9955/docs>

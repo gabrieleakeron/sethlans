@@ -21,25 +21,24 @@ Run once after installing the package:
 sethlans setup
 ```
 
-Plugin files are copied unconditionally first. After that the wizard walks through 4
+Plugin files are copied unconditionally first. After that the wizard walks through 2
 independently steppable sections — each one offers **Configure**, **Test**, **Save & continue**,
 or **Skip this step**, looping until you Save or Skip:
 
 | Step | What it does |
 |---|---|
-| 1 — Sethlans Board | Local (Docker, SQLite/PostgreSQL) or remote URL. `Test` checks Docker/DB reachability (local) or does a HEAD request (remote) without registering anything. `Save` runs `docker compose up -d` against the repo's `docker-compose.yml` (if chosen) and registers the `sethlans-board` MCP server. If you pick PostgreSQL with `localhost`/`127.0.0.1` as host, it is automatically translated to `host.docker.internal` before being handed to the container — `localhost` inside the container means the container itself, not your machine. |
-| 2 — Ticket MCP | Atlassian (Jira), Linear, or GitHub Issues. |
-| 3 — Docs MCP | Confluence (reuses Atlassian if already saved in step 2) or Notion. |
-| 4 — Code-quality MCP | CodeScene, SonarQube, or Codacy. |
+| 1 — Sethlans Board | Local only: SQLite (default) or PostgreSQL. `Test` checks Docker/DB reachability without registering anything. `Save` runs `docker compose up -d` against the repo's `docker-compose.yml` (if chosen) and registers the `sethlans-board` MCP server. If you pick PostgreSQL with `localhost`/`127.0.0.1` as host, it is automatically translated to `host.docker.internal` before being handed to the container — `localhost` inside the container means the container itself, not your machine. |
+| 2 — Code intelligence (LSP) | Installs `agent-lsp` + `serena` and the LSP backends (pylsp, typescript-language-server, optionally jdtls). Full (all three languages) or Custom per language. |
 
-`Test` on steps 2–4 makes a real authenticated request against the provider's API (e.g. GitHub
-`GET /user`, Notion `GET /v1/users/me`) so a bad token shows up as "authentication failed", not as
-a false positive — see `testProvider()`/`test()` in [`lib/mcp-providers.js`](lib/mcp-providers.js).
-Tokens and the PostgreSQL password are entered in plain text (no masking) via `ask()` in
+The PostgreSQL password is entered in plain text (no masking) via `ask()` in
 [`lib/prompts.js`](lib/prompts.js).
 
-All `claude mcp add` registrations use `-s user` (global scope): the servers are available in
-every project, not just the one the wizard happened to run from.
+`sethlans-board` is registered with `-s user` (global scope): available in every project.
+
+> **Integration MCPs** (tickets · docs · code-quality) are **not** configured here. They are wired
+> globally on demand by [`/sethlans-onboard`](../sethlans-claude-plugin/commands/sethlans-onboard.md)
+> (always `-s user`, one token per provider), and each project keeps only the *references* (Jira
+> key, Confluence space, Codacy/CodeScene project) in `.claude/project-profile.yaml`.
 
 A final **confirmation step** prints a summary of what was configured/skipped and asks before
 writing `~/.claude/sethlans-config.json` (used by `/sethlans-onboard`); declining lets you restart
@@ -48,7 +47,7 @@ the wizard or discard the run.
 **Restart Claude Code** after the wizard to load the new skills and agents.
 
 ```bash
-sethlans setup --update   # re-copy plugin files, skip MCP prompts for already-configured providers
+sethlans setup --update   # re-copy plugin files (overwrites without per-file prompts), re-run board + LSP steps
 ```
 
 ### `sethlans board up` — bring up the board standalone
@@ -66,6 +65,24 @@ host/port/db/user/password, probes reachability with a disposable
 then runs `docker compose up -d` against the repo's `docker-compose.yml` with the resolved
 `SETHLANS_SERVICE_DB_URL`. No npm dependency on `pg`; connectivity testing shells out to Docker,
 which is already required to run the board.
+
+### `sethlans uninstall` — remove Sethlans
+
+Removes the plugin from `~/.claude/` — skills, the 10 `seth-*` agents, the protocol docs and the
+`sethlans-board` MCP server — and deregisters the code-intelligence MCPs (`agent-lsp`, `serena`)
+from `~/.claude/.mcp.json` (other servers in that file are left intact). It then **asks** whether to
+also deregister the integration MCPs (tickets/docs/code-quality, which may be shared with other
+tools) and whether to stop the local board containers.
+
+```bash
+sethlans uninstall            # standalone
+# or pick "Uninstall Sethlans" from the first prompt of `sethlans setup`
+```
+
+The board **database is always preserved**: the containers are brought down with `docker compose
+down` (no `--volumes`), so the `sethlans-board-data` volume survives. Globally-installed CLIs
+(`agent-lsp`, `serena`, `pylsp`, …) are left in place — remove them manually if you want a fully
+clean slate.
 
 ### `sethlans preview init` — bundle the board preview into your repo
 
@@ -179,7 +196,6 @@ sethlans/
     preview.js       # `sethlans preview init` — bundles the preview into the user repo,
                      # writes/merges .claude/launch.json idempotently
     copy-plugin.js  # copies claude-plugin/ → ~/.claude/; reads/writes sethlans-config.json
-    mcp-providers.js# registry of known MCP providers (ticket, docs, code-quality)
     lsp.js          # agent-lsp/serena/pylsp/typescript-language-server/jdtls installers +
                      # ~/.claude/.mcp.json writer — shared by postinstall.js and setup.js
     prompts.js      # readline-based ask() and menu() helpers (no external deps)

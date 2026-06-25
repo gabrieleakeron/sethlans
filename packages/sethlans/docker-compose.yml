@@ -2,7 +2,7 @@ name: sethlans
 
 services:
   backend:
-    image: gifsonick/sethlans-server:latest
+    image: gabrieleconsonni/sethlans-server:latest
     container_name: sethlans-server
     environment:
       # PostgreSQL (opt-in):
@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: gifsonick/sethlans-board:latest
+    image: gabrieleconsonni/sethlans-board:latest
     container_name: sethlans-board
     ports:
       - "5173:80"

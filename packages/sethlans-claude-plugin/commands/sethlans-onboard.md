@@ -37,23 +37,26 @@ Do not write `~/.claude/.mcp.json` directly; the postinstall script owns that fi
 
 Report the final status (agent-lsp present/missing, serena present/missing).
 
-## 0-C. Per-project integration MCPs (tickets · docs · code quality)
-The three integration slots — **tickets**, **docs**, **code quality** — are configured **per
-project**, and the provider for a slot may differ from the global default. The global
-`~/.claude/sethlans-config.json` (`mcps.{ticket,docs,codeQuality}`, written by `sethlans setup`)
-only supplies the **default suggestion**; this step lets the user pick a per-project provider,
-**wire** the MCP-based ones scoped to the project, and **record** the non-MCP ones as pointers the
-subagents act on. Everything here is **optional, best-effort, never blocking**: if the user
-declines a slot, skip it silently — the subagents degrade gracefully (the reviewer omits Code
-Health, the PO works from descriptions written on the spot).
+## 0-C. Integration MCPs (tickets · docs · code quality) — global servers, per-project references
+One rule governs the three integration slots — **tickets**, **docs**, **code quality**:
 
-Run the loop below **once per slot**. Read `~/.claude/sethlans-config.json` first (if present) to
-seed the default provider per slot; if it is missing or the key is `null`, just ask directly.
+> **The MCP server + its token live globally** (one per provider, registered `-s user`); **the
+> project stores only the *reference*** — which Jira project / Confluence space / repo / Codacy or
+> CodeScene project to act on.
 
-### Step 1 — choose the provider for this project
-Show the slot's known providers (default = the global `mcps.<slot>` when set) and let the user pick
-or confirm. Record the choice under `mcps.<slot>` in `.claude/project-profile.yaml` (this is the
-per-project override of the global default):
+A token is a **machine/user credential reused across every repo** — never project-scoped, never
+written into a file (always passed as a `-e` env var on registration). This step **populates the
+global servers on demand** as you onboard projects, and records the lightweight per-project
+references. Everything here is **optional, best-effort, never blocking**: if the user declines a
+slot, skip it silently — the subagents degrade gracefully (the reviewer omits Code Health, the PO
+works from descriptions written on the spot).
+
+Read `~/.claude/sethlans-config.json` first: `mcps.{ticket,docs,codeQuality}` records the **global
+default provider** per slot (this file is updated here, as onboards happen). Run the loop below
+**once per slot**.
+
+### Step 1 — confirm the provider for this slot
+Default = the global `mcps.<slot>` when set; otherwise ask. Known providers:
 
 | Slot | Known providers |
 |---|---|
@@ -61,52 +64,43 @@ per-project override of the global default):
 | docs | `atlassian` · `notion` · `github-wiki` |
 | code quality | `codescene` · `sonarqube` · `codacy` |
 
-All code-quality providers (incl. **`codacy`**) are MCP servers (Step 2a). The official **Codacy**
-MCP also runs **local** analysis through its `codacy_cli_analyze` tool — so a separate "local
-Codacy" provider is **not** needed; pick `codacy`. The only **non-MCP** provider is **`github-wiki`**
-(docs, Step 2b).
+`github-wiki` (docs) is the only **non-MCP** provider — for it, skip Step 2 and go straight to
+Step 3. The official **Codacy** MCP also runs **local** analysis via its `codacy_cli_analyze` tool,
+so no separate "local Codacy" provider is needed.
 
-### Step 2a — MCP-based provider → resolve, then offer to wire
-For `atlassian` / `linear` / `github` / `notion` / `codescene` / `sonarqube` / `codacy`:
-- **Resolve** whether the server's `mcp__<server>__*` tools are already wired, in the order used by
-  `~/.claude/commands/sethlans-healthcheck.md` §3: project `./.mcp.json` → the active project's
-  block in `~/.claude.json` → the global block (fallback). If it resolves only globally, note it
-  is *global-only* (not scoped to this project).
-- If it is **not wired at project scope**, ask: *"Wire `<provider>` for this project now? [y/n]"*.
-  On yes, register it **project-scoped** with `claude mcp add --scope project …` — never by
-  hand-editing `~/.claude.json`. Use the recipes already documented in
-  `~/.claude/code-quality-protocol.md` (code-quality vendors) and
-  `~/.claude/commands/sethlans-healthcheck.md` §3a (Atlassian http transport). For **GitHub**, use
-  the recipe consistent with the `sethlans setup` registry
-  (`claude mcp add --scope project github -e GITHUB_TOKEN=<token> -- npx -y @modelcontextprotocol/server-github@latest`).
-  For **Codacy**, use the official MCP
-  (`claude mcp add --scope project codacy -e CODACY_ACCOUNT_TOKEN=<token> -- npx -y @codacy/codacy-mcp@latest`);
-  its `codacy_cli_analyze` tool does local analysis (the account token is required even for that,
-  and on **Windows** the local path needs **WSL**). Pass URLs/tokens via **env vars only — never
-  hardcode secrets**.
-- Then ask: *"Also add `<provider>` to the global config (available in every project)? [y/n]"* — on
-  yes, register it again with `-s user`. Remind the user to restart Claude Code (or reload MCP
-  servers) so the new tools load.
+### Step 2 — ensure the provider's MCP is wired **globally** (`-s user`)
+Check whether the provider's `mcp__<server>__*` tools are loaded — i.e. it is registered at **user
+scope** in `~/.claude.json`. There is **only one scope to check**: global.
+- **Already wired** → nothing to do (the token is already there, shared by every repo).
+- **Not wired** → ask *"Wire `<provider>` globally now? [y/n]"*. On yes, register it **`-s user`** —
+  **never `--scope project`**, never hand-edit `~/.claude.json`. Pass URLs/tokens via **`-e` env
+  vars only — never hardcode secrets**. Recipes:
+  - **atlassian** — `claude mcp add atlassian -s user -e ATLASSIAN_BASE_URL=<url> -e ATLASSIAN_EMAIL=<email> -e ATLASSIAN_API_TOKEN=<token> -- npx -y @atlassian/mcp@latest`
+  - **github** — `claude mcp add github -s user -e GITHUB_TOKEN=<token> -- npx -y @modelcontextprotocol/server-github@latest`
+  - **linear** — `claude mcp add linear -s user -e LINEAR_API_KEY=<key> -- npx -y @linear/mcp@latest`
+  - **notion** — `claude mcp add notion -s user -e NOTION_API_TOKEN=<token> -- npx -y @modelcontextprotocol/server-notion@latest`
+  - **codescene · sonarqube · codacy** — use the vendor recipe in `~/.claude/code-quality-protocol.md`
+    (Codacy: `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN=<token> -- npx -y @codacy/codacy-mcp@latest`;
+    its `codacy_cli_analyze` does local analysis and needs **WSL** on Windows).
 
-### Step 2b — non-MCP provider → record the pointer (no `claude mcp add`)
-- **`github-wiki`** (docs): the project's GitHub wiki is a git repo (`<repo>.wiki.git`), not an
-  MCP. Ask for the wiki repo URL (and, optionally, a local clone path). Record under
-  `roles.seth-product-owner.docs` and `roles.seth-architect.docs` as
-  `{ provider: github-wiki, wiki_repo: <url>, local_path: <optional> }`.
+  Then **record the global default** under `mcps.<slot>` in `~/.claude/sethlans-config.json`, and
+  remind the user to **restart Claude Code** (or reload MCP servers) so the new tools load.
 
-### Step 3 — record the per-role pointer
-Ask the slot's identifier and save it into `.claude/project-profile.yaml`:
-- **ticket** → `roles.seth-product-owner.ticket` = `{ provider, repo: <owner>/<repo>, project: <GitHub Project name / Jira key / Linear team> }`.
-  *(GitHub example: `repo: <owner>/sethlans`, `project: sethlans-project`.)* The legacy flat key
-  `roles.seth-product-owner.jira_project` stays valid as the `provider: atlassian` shorthand.
-- **docs** → `roles.seth-product-owner.docs` **and** `roles.seth-architect.docs` (Confluence space,
-  Notion URL, or the `github-wiki` block from Step 2b). Legacy `docs_space` stays valid.
-- **code quality** → `roles.seth-reviewer.codeQuality` = `{ provider, project: <repo on the MCP> }`
-  (for Codacy, the repo as configured on the account; local runs go through `codacy_cli_analyze`).
-  Legacy flat key `codeQuality_project` stays valid.
+### Step 3 — record the per-project reference (no token, no server)
+Ask **only** for the slot's reference and save it into `.claude/project-profile.yaml` under `slots`
+(plus the per-role pointer that flows into the board in step 2):
+- **ticket** → `slots.ticket = { provider, project: <Jira key / GitHub Project / Linear team>, repo: <owner>/<repo> }`,
+  mirrored to `roles.seth-product-owner.ticket`. Legacy flat key `roles.seth-product-owner.jira_project`
+  stays valid as the `provider: atlassian` shorthand.
+- **docs** → `slots.docs = { provider, space|url }` — **or**, for `github-wiki`,
+  `{ provider: github-wiki, wiki_repo: <url>, local_path: <optional> }` (a `<repo>.wiki.git` git
+  repo, no MCP). Mirror to `roles.seth-product-owner.docs` **and** `roles.seth-architect.docs`.
+  Legacy `docs_space` stays valid.
+- **code quality** → `slots.codeQuality = { provider, project: <repo on the MCP> }`, mirrored to
+  `roles.seth-reviewer.codeQuality`. Legacy `codeQuality_project` stays valid.
 
-These per-role pointers flow into the board's `project.config` in step 2 (unchanged mechanism) —
-this is how they reach the subagents.
+These per-role pointers flow into the board's `project.config` in step 2 — this is how they reach
+the subagents.
 
 ## 0. Sethlans Board healthcheck
 - `GET $base/state`. If it does NOT respond: warn the board is down and **stop** (the real

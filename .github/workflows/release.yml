@@ -1,0 +1,68 @@
+name: Release
+
+# Pushing a tag like `v0.1.0` builds the `sethlans` CLI tarball and attaches it
+# to a GitHub Release. End users then download the asset and install it with npm:
+#
+#   npm install -g sethlans-<version>.tgz
+#   sethlans setup
+#
+# `npm pack` runs the package's `prepack` (bundle-plugin.js + bundle-preview.js),
+# which copies the sibling `sethlans-claude-plugin/` and `sethlans-board-preview/`
+# sources into the package before packing — so the tarball is self-contained.
+# `postinstall` does NOT run during pack, only on the user's `npm install`.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required to create the release and upload the asset
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full repo — prepack needs the sibling packages)
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Sync package version to the tag (strip leading "v")
+        working-directory: packages/sethlans
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
+      - name: Build tarball (runs prepack: bundle plugin + preview)
+        working-directory: packages/sethlans
+        run: npm pack
+
+      - name: Sanity check — install the tarball and run the CLI
+        working-directory: packages/sethlans
+        # --ignore-scripts skips the heavy postinstall (agent-lsp/serena + LSP
+        # backends): the check is that the tarball installs and the bin runs, not
+        # that the code-intelligence stack downloads. A non-zero exit fails the
+        # release before any asset is published.
+        run: |
+          npm install -g --ignore-scripts ./sethlans-*.tgz
+          sethlans --version
+          sethlans --help
+
+      - name: Create GitHub Release with the .tgz asset
+        uses: softprops/action-gh-release@v2
+        with:
+          # Path is relative to the repo root (GITHUB_WORKSPACE), not the step's
+          # working-directory — the action runs from the workspace root.
+          files: packages/sethlans/sethlans-*.tgz
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            Download `sethlans-${{ github.ref_name }}.tgz` below, then:
+
+            ```bash
+            npm install -g sethlans-*.tgz
+            sethlans setup
+            ```

@@ -72,64 +72,46 @@ async function runStep(title, handlers) {
 }
 
 async function stepBoard(config) {
-  const state = { boardUrl: 'http://localhost:9955', mode: null, dbUrl: null, bringUp: false, dbChoice: 0 }
+  const state = { boardUrl: 'http://localhost:9955', dbUrl: null, bringUp: false, dbChoice: 0, configured: false }
 
-  return runStep('Step 1 — Sethlans Board (Docker, DB, MCP)', {
-    isConfigured: () => state.mode !== null,
+  return runStep('Step 1 — Sethlans Board (local: Docker + DB + MCP)', {
+    isConfigured: () => state.configured,
 
     async configure() {
-      const modeChoice = await menu('Where does Sethlans Board run?', [
-        'Local (started with Docker, default port 9955)',
-        'Remote — enter URL'
+      state.dbChoice = await menu('Database for the Board?', [
+        'SQLite (default, zero config)',
+        'PostgreSQL — enter connection URL'
       ])
-      state.mode = modeChoice === 0 ? 'local' : 'remote'
-
-      if (state.mode === 'local') {
-        state.dbChoice = await menu('Database for the Board?', [
-          'SQLite (default, zero config)',
-          'PostgreSQL — enter connection URL'
-        ])
-        if (state.dbChoice === 1) {
-          const pgHost = (await ask('  PostgreSQL Host [localhost]: ')).trim() || 'localhost'
-          const pgPort = (await ask('  PostgreSQL Port [5432]: ')).trim() || '5432'
-          const pgUser = (await ask('  PostgreSQL User [postgres]: ')).trim() || 'postgres'
-          const pgPwd = (await ask('  PostgreSQL Password [password]: ')).trim() || 'password'
-          const pgDb = (await ask('  PostgreSQL Database [sethlans_service]: ')).trim() || 'sethlans_service'
-          state.dbUrl = `postgresql+psycopg2://${pgUser}:${pgPwd}@${pgHost}:${pgPort}/${pgDb}`
-        } else {
-          state.dbUrl = null
-        }
-        state.bringUp = isDockerAvailable() && await confirm('Bring up Sethlans Board on Docker now?', true)
+      if (state.dbChoice === 1) {
+        const pgHost = (await ask('  PostgreSQL Host [localhost]: ')).trim() || 'localhost'
+        const pgPort = (await ask('  PostgreSQL Port [5432]: ')).trim() || '5432'
+        const pgUser = (await ask('  PostgreSQL User [postgres]: ')).trim() || 'postgres'
+        const pgPwd = (await ask('  PostgreSQL Password [password]: ')).trim() || 'password'
+        const pgDb = (await ask('  PostgreSQL Database [sethlans_service]: ')).trim() || 'sethlans_service'
+        state.dbUrl = `postgresql+psycopg2://${pgUser}:${pgPwd}@${pgHost}:${pgPort}/${pgDb}`
       } else {
-        state.boardUrl = (await ask('  Board URL: ')).trim() || state.boardUrl
+        state.dbUrl = null
       }
+      state.bringUp = isDockerAvailable() && await confirm('Bring up Sethlans Board on Docker now?', true)
+      state.configured = true
     },
 
     async test() {
-      if (state.mode === 'local') {
-        if (!isDockerAvailable()) {
-          console.log('  ! Docker is not installed or not running.')
-          return
-        }
-        console.log('  ✔ Docker is available.')
-        if (state.dbUrl) {
-          console.log('  Testing connection to PostgreSQL...')
-          console.log(isDatabaseAvailable(state.dbUrl) ? '  ✔ PostgreSQL reachable.' : '  ! Could not reach PostgreSQL with these parameters.')
-        } else {
-          console.log('  ✔ SQLite — no external dependency to test.')
-        }
+      if (!isDockerAvailable()) {
+        console.log('  ! Docker is not installed or not running.')
+        return
+      }
+      console.log('  ✔ Docker is available.')
+      if (state.dbUrl) {
+        console.log('  Testing connection to PostgreSQL...')
+        console.log(isDatabaseAvailable(state.dbUrl) ? '  ✔ PostgreSQL reachable.' : '  ! Could not reach PostgreSQL with these parameters.')
       } else {
-        try {
-          const res = await fetch(state.boardUrl, { method: 'HEAD', signal: AbortSignal.timeout(5000) })
-          console.log(`  ✔ Reachable (HTTP ${res.status}).`)
-        } catch (err) {
-          console.log(`  ! Could not reach ${state.boardUrl}: ${err.message}`)
-        }
+        console.log('  ✔ SQLite — no external dependency to test.')
       }
     },
 
     async save() {
-      if (state.mode === 'local' && state.bringUp) {
+      if (state.bringUp) {
         console.log('\n  Starting Sethlans Board on Docker...')
         try {
           dockerPullAndUp({ dbUrl: state.dbUrl })
@@ -146,14 +128,13 @@ async function stepBoard(config) {
       console.log(`\n  Registering MCP server: claude ${mcpCmd}`)
       runClaude(mcpCmd)
 
-      config.board = { url: state.boardUrl, dbUrl: state.dbUrl }
+      config.board = { mode: 'local', url: state.boardUrl, dbUrl: state.dbUrl }
     }
   })
 }
 
 export async function updateBoard(args) {
   const config = readConfig()
-  config.mcps = config.mcps || {}
 
   console.log('\n')
   console.log('╔══════════════════════════════════╗')
