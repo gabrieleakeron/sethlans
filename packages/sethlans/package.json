@@ -1,0 +1,26 @@
+{
+  "name": "sethlans",
+  "version": "0.0.1",
+  "description": "CLI to install the Sethlans plugin for Claude Code and configure LSP-over-MCP in workspaces",
+  "type": "module",
+  "bin": {
+    "sethlans": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/",
+    "claude-plugin/",
+    "board-preview/",
+    "docker-compose.yml"
+  ],
+  "scripts": {
+    "prepack": "node scripts/bundle-plugin.js && node scripts/bundle-preview.js",
+    "postinstall": "node scripts/postinstall.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

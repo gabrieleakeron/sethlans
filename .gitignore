@@ -1,0 +1,28 @@
+# --- Python (backend) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+packages/sethlans-board/backend/service.db
+*.sqlite
+*.sqlite3
+
+# --- Node (frontend) ---
+node_modules/
+dist/
+.env
+*.local
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- segreti / credenziali (mai versionare) ---
+.credentials.json
+*.pem
+*.key
+
+# --- impostazioni locali di Claude Code (personali, per-macchina) ---
+.claude/settings.local.json

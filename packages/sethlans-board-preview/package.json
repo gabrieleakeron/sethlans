@@ -1,0 +1,14 @@
+{
+  "name": "sethlans-board-preview",
+  "version": "1.0.0",
+  "description": "Zero-dependency Node.js + SQLite board, single process, mobile-first accordion UI — for running the Sethlans Board inside Claude Code cloud/mobile sessions via Claude Preview.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/"
+  },
+  "license": "Apache-2.0"
+}

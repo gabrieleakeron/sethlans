@@ -1,0 +1,42 @@
+name: sethlans-dev
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: sethlans-dev-server
+    environment:
+      - SETHLANS_SERVICE_DB_URL=postgresql+psycopg2://postgres:postgres@host.docker.internal:5432/sethlans_dev_service
+      - SETHLANS_SERVICE_CORS_ORIGINS=http://localhost:8081
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+      - sethlans-dev-board-data:/data
+    ports:
+      - "8080:9955"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: sethlans-dev-board
+    environment:
+      - VITE_API_URL=http://localhost:8080
+      # Su Windows gli eventi del filesystem non attraversano sempre il bind
+      # mount: con VITE_USE_POLLING=true Vite rileva comunque ogni modifica.
+      - VITE_USE_POLLING=true
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "8081:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  sethlans-dev-board-data:
+    name: sethlans-dev-board-data

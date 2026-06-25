@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+sqlalchemy>=2.0
+alembic>=1.13
+# psycopg2 incluso sempre: l'immagine deve poter usare PostgreSQL anche quando
+# il default è SQLite (i requirements sono uguali a prescindere dall'installazione).
+psycopg2-binary>=2.9
+# test (unit veloci; integrazione/E2E sono a carico del seth-tester)
+pytest>=8.0
+httpx>=0.27

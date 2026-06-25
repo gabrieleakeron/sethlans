@@ -1,0 +1,33 @@
+{
+  "name": "sethlans",
+  "version": "1.4.0",
+  "description": "PO→UX→architect→dev orchestration flow with Sethlans Board visualization",
+  "author": {
+    "name": "gifsonick",
+    "url": "https://github.com/GabrieleConsonni"
+  },
+  "homepage": "https://github.com/GabrieleConsonni/sethlans",
+  "repository": "https://github.com/GabrieleConsonni/sethlans",
+  "license": "Apache-2.0",
+  "keywords": [
+    "orchestration",
+    "subagents",
+    "workflow",
+    "kanban",
+    "board",
+    "mcp",
+    "product-owner",
+    "architect"
+  ],
+  "mcpServers": {
+    "sethlans-board": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"],
+      "env": {
+        "SETHLANS_SERVICE_API_URL": "${SETHLANS_SERVICE_API_URL}",
+        "SETHLANS_SERVICE_CF_ACCESS_CLIENT_ID": "${SETHLANS_SERVICE_CF_ACCESS_CLIENT_ID}",
+        "SETHLANS_SERVICE_CF_ACCESS_CLIENT_SECRET": "${SETHLANS_SERVICE_CF_ACCESS_CLIENT_SECRET}"
+      }
+    }
+  }
+}

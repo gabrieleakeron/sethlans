@@ -1,0 +1,9 @@
+# data/board.db è committato di proposito (persistenza tra sessioni cloud/mobile effimere).
+# In journal_mode=DELETE (default qui) non esistono file -wal/-shm, ma li ignoriamo comunque
+# per sicurezza nel caso in futuro si passi a WAL.
+data/board.db-wal
+data/board.db-shm
+data/board.db-journal
+
+node_modules/
+.DS_Store

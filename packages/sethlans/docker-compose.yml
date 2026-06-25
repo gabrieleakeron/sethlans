@@ -1,0 +1,33 @@
+name: sethlans
+
+services:
+  backend:
+    image: gifsonick/sethlans-server:latest
+    container_name: sethlans-server
+    environment:
+      # PostgreSQL (opt-in):
+      # - SETHLANS_SERVICE_DB_URL=postgresql+psycopg2://user:pass@host:5432/db
+      # If Postgres runs on the host machine, use `host.docker.internal` as the
+      # hostname (not `localhost`/`127.0.0.1` — that resolves to this container).
+      - SETHLANS_SERVICE_DB_URL=${SETHLANS_SERVICE_DB_URL:-sqlite:////data/service.db}
+      - SETHLANS_SERVICE_CORS_ORIGINS=${SETHLANS_SERVICE_CORS_ORIGINS:-http://localhost:5173}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - sethlans-board-data:/data
+    ports:
+      - "9955:9955"
+    restart: unless-stopped
+
+  frontend:
+    image: gifsonick/sethlans-board:latest
+    container_name: sethlans-board
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  sethlans-board-data:
+    name: sethlans-board-data

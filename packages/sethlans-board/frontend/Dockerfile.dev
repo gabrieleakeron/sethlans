@@ -1,0 +1,18 @@
+# Immagine di sviluppo: serve i file con il dev server di Vite (hot reload)
+# invece di buildare gli statici e servirli con Nginx. Il codice è montato a
+# runtime (vedi docker-dev-compose.yml), node_modules resta nell'immagine.
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+# Stesso motivo del Dockerfile di produzione: update-notifier/fund/audit
+# fanno fallire `npm ci` in Docker (npm/cli#7657).
+ENV npm_config_update_notifier=false \
+    npm_config_fund=false \
+    npm_config_audit=false
+RUN npm ci --include=dev
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev"]

@@ -1,0 +1,12 @@
+{
+  "name": "local-plugins",
+  "owner": { "name": "gifsonick" },
+  "description": "Local marketplace for the Sethlans plugin (dev/monorepo install).",
+  "plugins": [
+    {
+      "name": "sethlans",
+      "source": ".",
+      "description": "PO→UX→architect→dev orchestration flow with Sethlans Board visualization"
+    }
+  ]
+}
