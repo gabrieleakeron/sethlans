@@ -73,7 +73,7 @@ var → (tool registers)*. `<url>` is the vendor instance URL (non-secret, inlin
 | Provider | Env var (set via `setx`/`export`) | Where the user creates the token | Registration the flow runs |
 |---|---|---|---|
 | **codacy** | `CODACY_ACCOUNT_TOKEN` | Codacy → your avatar → **Account** → **Access Management** → **Create API token** (account token) | `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN='${CODACY_ACCOUNT_TOKEN}' -- npx -y @codacy/codacy-mcp@latest` |
-| **codescene** | `CODESCENE_API_TOKEN` | CodeScene → **User settings** → **API / Personal access tokens** → generate | `claude mcp add codescene -s user -e CODESCENE_API_URL=<url> -e CODESCENE_API_TOKEN='${CODESCENE_API_TOKEN}' -- docker run -i --rm -e CODESCENE_API_URL -e CODESCENE_API_TOKEN codescene/codescene-mcp` |
+| **codescene** | `CS_ACCESS_TOKEN` | Cloud → **codescene.io/users/me/pat** · on-prem → `https://<your-cs-host>/configuration/user/token` | `claude mcp add codescene -s user -e CS_ONPREM_URL=<url> -e CS_ACCESS_TOKEN='${CS_ACCESS_TOKEN}' -- docker run -i --rm -e CS_ONPREM_URL -e CS_ACCESS_TOKEN codescene/codescene-mcp` (omit the `CS_ONPREM_URL` for CodeScene Cloud) |
 | **sonarqube** | `SONARQUBE_TOKEN` | Sonar → **My Account** → **Security** → **Generate Tokens** | `claude mcp add sonarqube -s user -e SONARQUBE_URL=<url> -e SONARQUBE_TOKEN='${SONARQUBE_TOKEN}' -- <sonar-mcp-launch-command>` |
 
 > Commands are **current templates** — check the vendor's MCP docs for the exact package, transport

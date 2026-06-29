@@ -98,12 +98,17 @@ scope** in `~/.claude.json`. There is **only one scope to check**: global.
   | Provider | Slot(s) | Env var the user `setx`/`export`s | Where to create the token | Registration you run |
   |---|---|---|---|---|
   | **atlassian** | ticket + docs | `ATLASSIAN_API_TOKEN` | id.atlassian.com → **Security** → **API tokens** → **Create** | `claude mcp add atlassian -s user -e ATLASSIAN_BASE_URL=<url> -e ATLASSIAN_EMAIL=<email> -e ATLASSIAN_API_TOKEN='${ATLASSIAN_API_TOKEN}' -- npx -y @atlassian/mcp@latest` |
-  | **github** | ticket | `GITHUB_TOKEN` | github.com → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained** → **Generate** | `claude mcp add github -s user -e GITHUB_TOKEN='${GITHUB_TOKEN}' -- npx -y @modelcontextprotocol/server-github@latest` |
+  | **github** | ticket | `GITHUB_TOKEN` | github.com → **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained** → **Generate** (grant on the target repos: Contents RO, Pull requests RW, Issues RW, Metadata RO) | `claude mcp add github -s user -e GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_TOKEN}' -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server` |
   | **linear** | ticket | `LINEAR_API_KEY` | linear.app → **Settings** → **Security & access** → **Personal API keys** → **New key** | `claude mcp add linear -s user -e LINEAR_API_KEY='${LINEAR_API_KEY}' -- npx -y @linear/mcp@latest` |
   | **notion** | docs | `NOTION_API_TOKEN` | notion.so/my-integrations → **New integration** → copy the secret | `claude mcp add notion -s user -e NOTION_API_TOKEN='${NOTION_API_TOKEN}' -- npx -y @modelcontextprotocol/server-notion@latest` |
   | **codacy** | code quality | `CODACY_ACCOUNT_TOKEN` | Codacy → **Account** → **Access Management** → **Create API token** | `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN='${CODACY_ACCOUNT_TOKEN}' -- npx -y @codacy/codacy-mcp@latest` |
-  | **codescene** | code quality | `CODESCENE_API_TOKEN` | CodeScene → **User settings** → **API tokens** | `claude mcp add codescene -s user -e CODESCENE_API_URL=<url> -e CODESCENE_API_TOKEN='${CODESCENE_API_TOKEN}' -- docker run -i --rm -e CODESCENE_API_URL -e CODESCENE_API_TOKEN codescene/codescene-mcp` |
+  | **codescene** | code quality | `CS_ACCESS_TOKEN` | Cloud → **codescene.io/users/me/pat** · on-prem → `https://<host>/configuration/user/token` | `claude mcp add codescene -s user -e CS_ONPREM_URL=<url> -e CS_ACCESS_TOKEN='${CS_ACCESS_TOKEN}' -- docker run -i --rm -e CS_ONPREM_URL -e CS_ACCESS_TOKEN codescene/codescene-mcp` (drop `CS_ONPREM_URL` for Cloud) |
   | **sonarqube** | code quality | `SONARQUBE_TOKEN` | Sonar → **My Account** → **Security** → **Generate Tokens** | `claude mcp add sonarqube -s user -e SONARQUBE_URL=<url> -e SONARQUBE_TOKEN='${SONARQUBE_TOKEN}' -- <sonar-mcp-launch-command>` |
+
+  > **GitHub env-var mapping:** the user stores the de-facto-standard `GITHUB_TOKEN`, but the
+  > official `github-mcp-server` reads `GITHUB_PERSONAL_ACCESS_TOKEN` — hence the registration maps
+  > one to the other (`-e GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_TOKEN}'`). The old
+  > `@modelcontextprotocol/server-github` npm package is archived; use the `ghcr.io` image above.
 
   The full code-quality catalog (CodeScene/SonarQube/Codacy, plus Codacy's `codacy_cli_analyze`
   local analysis — needs **WSL** on Windows) lives in `~/.claude/code-quality-protocol.md`.

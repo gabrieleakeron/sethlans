@@ -11,6 +11,7 @@
 // recorded by /sethlans-onboard into .claude/project-profile.yaml, since this
 // wizard has no notion of "the current project". See sethlans-onboard.md §0-C.
 import { execSync } from 'child_process'
+import https from 'node:https'
 import { homedir } from 'os'
 import { join } from 'path'
 import { ask, menu, confirm, close } from './prompts.js'
@@ -36,6 +37,39 @@ function runClaude(args) {
   }
 }
 
+// Best-effort, output-swallowing `claude` call — used to drop a stale server
+// entry before re-registering, so re-running the wizard stays idempotent.
+function runClaudeQuiet(args) {
+  try { execSync(`claude ${args}`, { stdio: 'ignore' }); return true } catch { return false }
+}
+
+// Best-effort token probe (never throws). Hits the GitHub REST API with the
+// resolved token to confirm it's valid — catches expired/under-scoped PATs that
+// a mere "env var is visible" check would wave through.
+function probeGithub(token) {
+  return new Promise(resolve => {
+    const req = https.request({
+      host: 'api.github.com', path: '/user', method: 'GET',
+      headers: { 'User-Agent': 'sethlans-setup', Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }
+    }, res => {
+      let body = ''
+      res.on('data', d => { body += d })
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          let login = ''
+          try { login = JSON.parse(body).login } catch {}
+          resolve({ ok: true, detail: login ? `authenticated as ${login}` : 'authenticated' })
+        } else {
+          resolve({ ok: false, detail: `GitHub returned HTTP ${res.statusCode} (token invalid or under-scoped)` })
+        }
+      })
+    })
+    req.on('error', e => resolve({ ok: false, detail: e.message }))
+    req.setTimeout(5000, () => { req.destroy(); resolve({ ok: false, detail: 'timeout reaching api.github.com' }) })
+    req.end()
+  })
+}
+
 // ── Integration MCP catalog (tickets · docs · code quality) ──────────────────
 // The golden rule (see code-quality-protocol.md): a token is NEVER written into
 // a config file. The user stores it in an environment variable (setx/export) and
@@ -48,9 +82,14 @@ const INTEGRATION_SLOTS = [
 ]
 
 const PROVIDERS = {
-  github: { server: 'github', env: 'GITHUB_TOKEN',
-    tokenHint: 'github.com → Settings → Developer settings → Personal access tokens → Fine-grained → Generate',
-    inline: [], pkg: ['npx', '-y', '@modelcontextprotocol/server-github@latest'] },
+  // The user stores a plain GITHUB_TOKEN (the de-facto standard, often already
+  // set for git/gh), but the official server reads GITHUB_PERSONAL_ACCESS_TOKEN,
+  // so we map one to the other via `mcpEnv`. Official image (the old
+  // @modelcontextprotocol/server-github is archived).
+  github: { server: 'github', env: 'GITHUB_TOKEN', mcpEnv: 'GITHUB_PERSONAL_ACCESS_TOKEN',
+    tokenHint: 'github.com → Settings → Developer settings → Personal access tokens → Fine-grained → Generate. On the target repos grant: Contents (Read-only), Pull requests (Read/Write), Issues (Read/Write), Metadata (Read-only)',
+    inline: [], probe: probeGithub,
+    pkg: ['docker', 'run', '-i', '--rm', '-e', 'GITHUB_PERSONAL_ACCESS_TOKEN', 'ghcr.io/github/github-mcp-server'] },
   atlassian: { server: 'atlassian', env: 'ATLASSIAN_API_TOKEN',
     tokenHint: 'id.atlassian.com → Security → API tokens → Create',
     inline: [{ flag: 'ATLASSIAN_BASE_URL', q: 'Atlassian base URL (e.g. https://your.atlassian.net): ' },
@@ -67,10 +106,10 @@ const PROVIDERS = {
   codacy: { server: 'codacy', env: 'CODACY_ACCOUNT_TOKEN',
     tokenHint: 'Codacy → Account → Access Management → Create API token',
     inline: [], pkg: ['npx', '-y', '@codacy/codacy-mcp@latest'] },
-  codescene: { server: 'codescene', env: 'CODESCENE_API_TOKEN',
-    tokenHint: 'CodeScene → User settings → API tokens',
-    inline: [{ flag: 'CODESCENE_API_URL', q: 'CodeScene instance URL: ' }],
-    pkg: ['docker', 'run', '-i', '--rm', '-e', 'CODESCENE_API_URL', '-e', 'CODESCENE_API_TOKEN', 'codescene/codescene-mcp'] },
+  codescene: { server: 'codescene', env: 'CS_ACCESS_TOKEN',
+    tokenHint: 'CodeScene Cloud → codescene.io/users/me/pat · on-prem → https://<your-cs-host>/configuration/user/token',
+    inline: [{ flag: 'CS_ONPREM_URL', q: 'CodeScene on-prem URL (leave empty for CodeScene Cloud): ' }],
+    pkg: ['docker', 'run', '-i', '--rm', '-e', 'CS_ONPREM_URL', '-e', 'CS_ACCESS_TOKEN', 'codescene/codescene-mcp'] },
   sonarqube: { server: 'sonarqube', env: 'SONARQUBE_TOKEN',
     tokenHint: 'Sonar → My Account → Security → Generate Tokens',
     inline: [{ flag: 'SONARQUBE_URL', q: 'SonarQube/SonarCloud URL: ' }],
@@ -102,7 +141,12 @@ async function wireProvider(providerKey, slotKey, config) {
     console.log(`     Skipped ${providerKey} — set ${p.env} and re-run "sethlans setup --update" later.`)
     return
   }
-  if (!process.env[p.env]) {
+  if (process.env[p.env]) {
+    if (p.probe) {
+      const r = await p.probe(process.env[p.env])
+      console.log(r.ok ? `     ✔ Token works — ${r.detail}.` : `     ! Token check failed — ${r.detail}. Registering anyway; fix the token and re-run later.`)
+    }
+  } else {
     console.log(`     ! ${p.env} isn't visible in this shell yet (setx/export only affects new processes).`)
     console.log(`       Registering anyway — it resolves once you restart Claude Code + terminal.`)
   }
@@ -113,13 +157,20 @@ async function wireProvider(providerKey, slotKey, config) {
     if (v) inlineArgs.push(`-e ${item.flag}=${v}`)
   }
 
-  const cmd = `mcp add ${p.server} -s user ${inlineArgs.join(' ')} -e ${p.env}=${envPlaceholder(p.env)} -- ${p.pkg.join(' ')}`.replace(/\s+/g, ' ').trim()
+  // The env var the user stores (p.env) may differ from the one the MCP reads
+  // (p.mcpEnv) — e.g. GITHUB_TOKEN → GITHUB_PERSONAL_ACCESS_TOKEN. The -e flag
+  // carries the MCP-expected name; its value is the ${user-var} placeholder.
+  const mcpEnv = p.mcpEnv || p.env
+  const cmd = `mcp add ${p.server} -s user ${inlineArgs.join(' ')} -e ${mcpEnv}=${envPlaceholder(p.env)} -- ${p.pkg.join(' ')}`.replace(/\s+/g, ' ').trim()
   if (p.pkg.some(a => a.includes('<'))) {
     console.log(`     ${providerKey}'s launch command is vendor-specific — see code-quality-protocol.md.`)
     console.log(`     Once you know it, run:  claude ${cmd}`)
     config.mcps[slotKey] = providerKey
     return
   }
+  // Drop any prior user-scope entry so re-running the wizard doesn't duplicate
+  // or clash with a stale registration.
+  runClaudeQuiet(`mcp remove ${p.server} -s user`)
   console.log(`     Registering: claude ${cmd}`)
   runClaude(cmd)
   config.mcps[slotKey] = providerKey
@@ -341,9 +392,16 @@ async function stepIntegrations(config) {
       const entries = Object.entries(config.mcps)
       if (!entries.length) { console.log('  No integration providers selected.'); return }
       for (const [slot, prov] of entries) {
-        const env = PROVIDERS[prov]?.env
-        const seen = !env ? 'no token (non-MCP)' : (process.env[env] ? `${env} visible` : `${env} NOT visible yet — restart your terminal`)
-        console.log(`  ${slot}: ${prov} — ${seen}`)
+        const p = PROVIDERS[prov]
+        const env = p?.env
+        if (!env) { console.log(`  ${slot}: ${prov} — no token (non-MCP)`); continue }
+        if (!process.env[env]) { console.log(`  ${slot}: ${prov} — ${env} NOT visible yet — restart your terminal`); continue }
+        if (p.probe) {
+          const r = await p.probe(process.env[env])
+          console.log(`  ${slot}: ${prov} — ${r.ok ? `✔ ${r.detail}` : `! ${r.detail}`}`)
+        } else {
+          console.log(`  ${slot}: ${prov} — ${env} visible (not probed)`)
+        }
       }
     },
 

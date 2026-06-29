@@ -138,14 +138,15 @@ Known providers per slot (detect MCP ones by their `mcp__<server>__*` tools):
 
 For each wired server, do a best-effort liveness check (never fail the turn over it):
 
-- **stdio + npx** (Atlassian `@atlassian/mcp`, GitHub `@modelcontextprotocol/server-github`, Codacy
-  `@codacy/codacy-mcp`, Notion, …): the user-scope entry being present **and** its
-  `mcp__<server>__*` tools loaded means it's wired; the required env-var token must be set (e.g.
-  `ATLASSIAN_API_TOKEN`, `GITHUB_TOKEN`, `CODACY_ACCOUNT_TOKEN`). For Codacy's local
-  `codacy_cli_analyze`, note it needs WSL on Windows.
-- **stdio + docker** (e.g. CodeScene `codescene/codescene-mcp`): Docker up (see §1a), image present
-  (`docker image inspect <image>`), required env vars set. Report the image/token state — don't
-  pull blindly.
+- **stdio + npx** (Atlassian `@atlassian/mcp`, Codacy `@codacy/codacy-mcp`, Notion, …): the
+  user-scope entry being present **and** its `mcp__<server>__*` tools loaded means it's wired; the
+  required env-var token must be set (e.g. `ATLASSIAN_API_TOKEN`, `CODACY_ACCOUNT_TOKEN`). For
+  Codacy's local `codacy_cli_analyze`, note it needs WSL on Windows.
+- **stdio + docker** (GitHub `ghcr.io/github/github-mcp-server`, CodeScene `codescene/codescene-mcp`):
+  Docker up (see §1a), image present (`docker image inspect <image>`), required env vars set. Report
+  the image/token state — don't pull blindly. GitHub stores `GITHUB_TOKEN` but the server reads
+  `GITHUB_PERSONAL_ACCESS_TOKEN` (the registration maps one to the other); CodeScene uses
+  `CS_ACCESS_TOKEN` (+ `CS_ONPREM_URL` for on-prem).
 - **github-wiki (no MCP)**: best-effort confirm the `wiki_repo` URL is set (and the `local_path`
   clone exists if recorded); auth rides on git creds, not re-verified here.
 
@@ -174,10 +175,12 @@ it. The fix depends on **what** is missing:
      `'${VAR}'` (single-quoted) — **never `--scope project`**, never hand-edit `~/.claude.json`,
      **never inline the token value**. Only non-secret bits (instance URL, email) go inline on `-e`.
      The env var name per provider:
-     atlassian → `ATLASSIAN_API_TOKEN` · github → `GITHUB_TOKEN` · linear → `LINEAR_API_KEY` ·
-     notion → `NOTION_API_TOKEN` · codacy → `CODACY_ACCOUNT_TOKEN` · codescene → `CODESCENE_API_TOKEN` ·
-     sonarqube → `SONARQUBE_TOKEN`. (Codacy's `codacy_cli_analyze` does local analysis; needs WSL on
-     Windows. CodeScene runs its MCP via the `codescene/codescene-mcp` Docker image.)
+     atlassian → `ATLASSIAN_API_TOKEN` · github → `GITHUB_TOKEN` (registered as
+     `-e GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_TOKEN}'`) · linear → `LINEAR_API_KEY` ·
+     notion → `NOTION_API_TOKEN` · codacy → `CODACY_ACCOUNT_TOKEN` · codescene → `CS_ACCESS_TOKEN`
+     (+ `CS_ONPREM_URL` for on-prem) · sonarqube → `SONARQUBE_TOKEN`. (Codacy's `codacy_cli_analyze`
+     does local analysis; needs WSL on Windows. GitHub & CodeScene run their MCP via the
+     `ghcr.io/github/github-mcp-server` and `codescene/codescene-mcp` Docker images.)
   Remind the user to **restart Claude Code and their terminal** so the env var resolves and the tools
   load. This is the same wiring `/sethlans-onboard` §0-C performs — running onboard also fixes it.
 - **Project reference missing** (server wired, but no Jira key / space / repo / CQ project for this
