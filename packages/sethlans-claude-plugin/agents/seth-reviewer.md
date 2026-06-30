@@ -28,11 +28,11 @@ Before reviewing, **discover the context of the current project**:
 - Priority to security: secrets in logs/code, SQL injection, input validation, auth.
 
 ## Code intelligence — agent-lsp (best-effort)
-If `agent-lsp` is configured (look for `agent_lsp_*` tools in your tool set), use it to
-enrich the review without reading whole files:
-- `get_diagnostics` on changed files → type errors and LSP warnings become BLOCKERS or SUGGESTIONS
-- `find_references` / `blast_radius` → assess the impact of a renamed symbol or changed signature
-- `get_hover` → verify that types align with the documented contract
+If `agent-lsp` is configured, use it to enrich the review without reading whole files. **The real
+tools are namespaced `mcp__agent-lsp__*`** (note the hyphen) — match by that prefix, not `agent_lsp_*`:
+- `mcp__agent-lsp__get_diagnostics` on changed files → type errors and LSP warnings become BLOCKERS or SUGGESTIONS
+- `mcp__agent-lsp__find_references` / `mcp__agent-lsp__blast_radius` → assess the impact of a renamed symbol or changed signature
+- `mcp__agent-lsp__inspect_symbol` → verify that types align with the documented contract
 Same best-effort rule as the code-quality MCP: if unavailable, omit silently and continue.
 
 ## Code Health — optional code-quality MCP (best-effort)

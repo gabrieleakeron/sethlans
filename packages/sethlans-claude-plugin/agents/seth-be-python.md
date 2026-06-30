@@ -29,9 +29,11 @@ Before implementing, **discover and follow the conventions of the current reposi
 - **Honor the agreed contract.** If the seth-architect/seth-fullstack defined an `## API Contract` for the story, implement it exactly and **expose the full surface the consumer needs** (for a read feature: list AND detail-by-id, plus action endpoints) — never leak secret fields in read schemas.
 
 ## Code intelligence — Serena (best-effort)
-Before opening whole files, use the `serena` MCP if available (look for `serena_*` tools) for
-targeted semantic lookups: `find_symbol`, `find_referencing_symbols`, `find_declaration`,
-`find_implementations`. Fallback: read + grep as usual.
+Before opening whole files, use an LSP MCP for targeted semantic lookups.
+**Prefer `mcp__serena__*`** (`mcp__serena__find_symbol`, `mcp__serena__find_referencing_symbols`).
+**If Serena is not connected** (it can still be initializing at spawn time), use the equivalent
+**`mcp__agent-lsp__*`** tools — `mcp__agent-lsp__find_symbol`, `mcp__agent-lsp__find_references`,
+`mcp__agent-lsp__blast_radius` — which load reliably. Fallback if neither is present: read + grep as usual.
 
 ## Testing (your responsibility — fast unit only)
 - Before marking the task `done`, **run the fast unit tests** for what you touched (the project's `pytest` command, scoped to the touched modules) plus lint/type checks (ruff/mypy) as the project defines. They must pass.

@@ -31,10 +31,12 @@ Before implementing, **discover and follow the conventions of the current reposi
 ## Testing (your responsibility — fast unit only)
 
 **Compile-time validation (fast loop)**
-Before opening whole files, use the `serena` MCP if available (look for `serena_*` tools in your
-tool set) for targeted lookups: `find_symbol`, `find_referencing_symbols`, `find_declaration`.
-This saves tokens on large codebases. For instant compile-time diagnostics, fall back to a
-compile-only command:
+Before opening whole files, use an LSP MCP for targeted lookups (saves tokens on large codebases).
+**Prefer `mcp__serena__*`** (`mcp__serena__find_symbol`, `mcp__serena__find_referencing_symbols`).
+**If Serena is not connected** (it can still be initializing at spawn time), use the equivalent
+**`mcp__agent-lsp__*`** tools — `mcp__agent-lsp__find_symbol`, `mcp__agent-lsp__find_references`,
+`mcp__agent-lsp__blast_radius` — which load reliably. Only fall back to read+grep if neither is
+present. For instant compile-time diagnostics, fall back to a compile-only command:
 - Gradle: `./gradlew compileJava compileTestJava`
 - Maven: `mvn compile test-compile -q`
 

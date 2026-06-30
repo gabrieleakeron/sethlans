@@ -36,10 +36,13 @@ Whenever a story spans **more than one layer/repo** (e.g. a FE that consumes a B
 
 ## Code intelligence — agent-lsp (best-effort)
 Before designing a contract or evaluating an existing codebase, use the `agent-lsp` MCP if
-available (look for `agent_lsp_*` tools in your tool set). Useful operations:
-- `list_symbols` / `get_definition` to navigate the existing structure without reading whole files
-- `find_references` / `find_callers` to assess the blast radius of a proposed change
-- `get_diagnostics` to detect pre-existing type errors before planning a fix
+available. **The real tools are namespaced `mcp__agent-lsp__*`** (note the hyphen) — match by that
+prefix, not `agent_lsp_*`. Useful operations:
+- `mcp__agent-lsp__blast_radius` — the canonical one-call tool: all exported symbols of a file with
+  callers partitioned test/non-test. Use it first to assess the blast radius of a proposed change.
+- `mcp__agent-lsp__list_symbols` / `mcp__agent-lsp__go_to_definition` to navigate structure without reading whole files
+- `mcp__agent-lsp__find_references` / `mcp__agent-lsp__find_callers` for fine-grained call sites
+- `mcp__agent-lsp__get_diagnostics` to detect pre-existing type errors before planning a fix
 Never block the design if agent-lsp is unavailable — fall back to reading files directly.
 
 ## Project knowledge — read before working

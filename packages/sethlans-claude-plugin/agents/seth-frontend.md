@@ -43,9 +43,11 @@ Before implementing, **discover and follow the conventions of the current reposi
 ## Testing (your responsibility)
 
 **Fast type/template check (inner loop)**
-Before opening whole files or running builds, use the `serena` MCP if available (look for
-`serena_*` tools) for targeted lookups: `find_symbol`, `find_referencing_symbols`, `find_declaration`.
-Then validate compilation:
+Before opening whole files or running builds, use an LSP MCP for targeted lookups.
+**Prefer `mcp__serena__*`** (`mcp__serena__find_symbol`, `mcp__serena__find_referencing_symbols`).
+**If Serena is not connected** (it can still be initializing at spawn time), use the equivalent
+**`mcp__agent-lsp__*`** tools — `mcp__agent-lsp__find_symbol`, `mcp__agent-lsp__find_references`,
+`mcp__agent-lsp__blast_radius` — which load reliably. Then validate compilation:
 - TypeScript: `tsc --noEmit` (type errors across all files)
 - Angular templates: `ng build --configuration=development --no-progress` (catches template binding
   errors that `tsc` alone misses) — or `ngc --noEmit` if the project exposes it.

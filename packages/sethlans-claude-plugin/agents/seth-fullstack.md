@@ -34,9 +34,11 @@ You own the FE↔BE contract end-to-end — that is the whole point of using you
 - Never secrets in logs/UI.
 
 ## Code intelligence — Serena (best-effort)
-Before opening whole files, use the `serena` MCP if available (look for `serena_*` tools) for
-targeted semantic lookups across FE and BE repos: `find_symbol`, `find_referencing_symbols`,
-`find_declaration`, `find_implementations`. Fallback: read + grep as usual.
+Before opening whole files, use an LSP MCP for targeted semantic lookups across FE and BE repos.
+**Prefer `mcp__serena__*`** (`mcp__serena__find_symbol`, `mcp__serena__find_referencing_symbols`).
+**If Serena is not connected** (it can still be initializing at spawn time), use the equivalent
+**`mcp__agent-lsp__*`** tools — `mcp__agent-lsp__find_symbol`, `mcp__agent-lsp__find_references`,
+`mcp__agent-lsp__blast_radius` — which load reliably. Fallback if neither is present: read + grep as usual.
 
 ## Project knowledge — read before working
 At the **start** of a task on a project, best-effort read the **project profile** and your **role's knowledge card(s)** from Sethlans Board before acting, so you honour the project spec (see the *Consumption rule* in `~/.claude/board-protocol.md`):
