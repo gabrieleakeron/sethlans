@@ -50,6 +50,14 @@ jobs:
           sethlans --version
           sethlans --help
 
+      - name: Duplicate the tarball as sethlans-latest.tgz (stable download URL)
+        working-directory: packages/sethlans
+        # Done AFTER the sanity check so the `./sethlans-*.tgz` glob above still
+        # matches a single file. The versioned tarball keeps its tag-derived
+        # name; `sethlans-latest.tgz` is a copy with a fixed name so that
+        # `npm install -g sethlans-latest.tgz` always points at the newest release.
+        run: cp sethlans-*.tgz sethlans-latest.tgz
+
       - name: Create GitHub Release with the .tgz asset
         uses: softprops/action-gh-release@v2
         with:
@@ -60,7 +68,16 @@ jobs:
           body: |
             ## Install
 
-            Download `sethlans-${{ github.ref_name }}.tgz` below, then:
+            Install the newest release directly from the stable "latest" URL
+            (always resolves to the most recent published release):
+
+            ```bash
+            npm install -g https://github.com/${{ github.repository }}/releases/latest/download/sethlans-latest.tgz
+            sethlans setup
+            ```
+
+            Or download `sethlans-${{ github.ref_name }}.tgz` (this exact version)
+            from the assets below and install the local file:
 
             ```bash
             npm install -g sethlans-*.tgz

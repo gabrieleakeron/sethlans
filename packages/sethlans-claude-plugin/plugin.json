@@ -4,10 +4,10 @@
   "description": "PO→UX→architect→dev orchestration flow with Sethlans Board visualization",
   "author": {
     "name": "gifsonick",
-    "url": "https://github.com/GabrieleConsonni"
+    "url": "https://github.com/gabrieleakeron"
   },
-  "homepage": "https://github.com/GabrieleConsonni/sethlans",
-  "repository": "https://github.com/GabrieleConsonni/sethlans",
+  "homepage": "https://github.com/gabrieleakeron/sethlans",
+  "repository": "https://github.com/gabrieleakeron/sethlans",
   "license": "Apache-2.0",
   "keywords": [
     "orchestration",
