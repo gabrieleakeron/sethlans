@@ -53,6 +53,12 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         if IS_POSTGRES:
             connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}"))
+            # search_path: serve a far risolvere nello schema dedicato anche il DDL
+            # NON qualificato. Lo schema_translate_map viene applicato solo alle
+            # CREATE TABLE, non agli ALTER TABLE (add_column/alter_column, incl. in
+            # batch_alter_table), che verrebbero emessi senza schema e fallirebbero
+            # con "relation does not exist". Impostarlo qui copre tutte le revisioni.
+            connection.execute(text(f"SET search_path TO {SCHEMA}, public"))
             connection.commit()
             connection = connection.execution_options(schema_translate_map={None: SCHEMA})
 

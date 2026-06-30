@@ -43,32 +43,39 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id'),
     )
-    # batch_alter_table: necessario per SQLite, che non supporta
-    # ALTER TABLE ... ALTER COLUMN nativamente (ricostruisce la tabella);
-    # su Postgres si comporta come le singole alter_column equivalenti.
-    with op.batch_alter_table('mockup_comments') as batch_op:
-        batch_op.add_column(sa.Column('mockup_id', sa.String(), nullable=True))
-        batch_op.alter_column('target_type',
-                   existing_type=sa.VARCHAR(),
-                   nullable=True)
-        batch_op.alter_column('target_id',
-                   existing_type=sa.VARCHAR(),
-                   nullable=True)
-        batch_op.alter_column('mockup_index',
-                   existing_type=sa.INTEGER(),
-                   nullable=True)
+    # batch_alter_table serve SOLO a SQLite, che non supporta ALTER COLUMN
+    # nativamente (ricostruisce la tabella). Su Postgres NON va usato qui:
+    # batch_alter_table NON applica lo schema_translate_map ({None: SCHEMA})
+    # configurato in env.py, quindi emette un `ALTER TABLE mockup_comments`
+    # non qualificato che — con search_path senza `sethlans_service` — fallisce
+    # con "relation does not exist" pur esistendo la tabella nello schema.
+    # Le op singole (add_column/alter_column) passano invece per il translate
+    # map, esattamente come le create_table che funzionano.
+    if op.get_bind().dialect.name == 'sqlite':
+        with op.batch_alter_table('mockup_comments') as batch_op:
+            batch_op.add_column(sa.Column('mockup_id', sa.String(), nullable=True))
+            batch_op.alter_column('target_type', existing_type=sa.VARCHAR(), nullable=True)
+            batch_op.alter_column('target_id', existing_type=sa.VARCHAR(), nullable=True)
+            batch_op.alter_column('mockup_index', existing_type=sa.INTEGER(), nullable=True)
+    else:
+        op.add_column('mockup_comments', sa.Column('mockup_id', sa.String(), nullable=True))
+        op.alter_column('mockup_comments', 'target_type', existing_type=sa.VARCHAR(), nullable=True)
+        op.alter_column('mockup_comments', 'target_id', existing_type=sa.VARCHAR(), nullable=True)
+        op.alter_column('mockup_comments', 'mockup_index', existing_type=sa.INTEGER(), nullable=True)
 
 
 def downgrade() -> None:
-    with op.batch_alter_table('mockup_comments') as batch_op:
-        batch_op.alter_column('mockup_index',
-                   existing_type=sa.INTEGER(),
-                   nullable=False)
-        batch_op.alter_column('target_id',
-                   existing_type=sa.VARCHAR(),
-                   nullable=False)
-        batch_op.alter_column('target_type',
-                   existing_type=sa.VARCHAR(),
-                   nullable=False)
-        batch_op.drop_column('mockup_id')
+    # Vedi nota in upgrade(): batch solo per SQLite, op singole su Postgres
+    # (altrimenti lo schema_translate_map non viene applicato).
+    if op.get_bind().dialect.name == 'sqlite':
+        with op.batch_alter_table('mockup_comments') as batch_op:
+            batch_op.alter_column('mockup_index', existing_type=sa.INTEGER(), nullable=False)
+            batch_op.alter_column('target_id', existing_type=sa.VARCHAR(), nullable=False)
+            batch_op.alter_column('target_type', existing_type=sa.VARCHAR(), nullable=False)
+            batch_op.drop_column('mockup_id')
+    else:
+        op.alter_column('mockup_comments', 'mockup_index', existing_type=sa.INTEGER(), nullable=False)
+        op.alter_column('mockup_comments', 'target_id', existing_type=sa.VARCHAR(), nullable=False)
+        op.alter_column('mockup_comments', 'target_type', existing_type=sa.VARCHAR(), nullable=False)
+        op.drop_column('mockup_comments', 'mockup_id')
     op.drop_table('mockups')
