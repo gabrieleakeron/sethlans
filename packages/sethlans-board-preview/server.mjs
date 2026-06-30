@@ -150,6 +150,51 @@ async function main() {
       return;
     }
 
+    // Endpoint di configurazione integrazioni (storia s12bff548): gestiti PRIMA di isRestPath()
+    // cosi' funzionano identici in embedded e proxy mode (non proxati, non nel DB).
+    // NON aggiunti a REST_PREFIXES per lo stesso motivo di /config.
+    // Auth obbligatoria (scrivono su fs): gate replicato qui perche' il gate generale
+    // e' applicato solo dopo isRestPath. Se SETHLANS_SERVICE_API_TOKEN e' settata, richiediamo
+    // X-Sethlans-Token anche su questi path (isValidToken importato da questo modulo).
+    if (pathname === "/integration-config" || pathname === "/integration-config/test") {
+      if (apiToken) {
+        const received = req.headers["x-sethlans-token"];
+        if (typeof received !== "string" || !isValidToken(apiToken, received)) {
+          sendJson(res, 401, { detail: "token mancante o non valido" });
+          return;
+        }
+      }
+
+      const { readJsonBody } = await import("./src/http-helpers.mjs");
+      const {
+        handleGetIntegrationConfig,
+        handlePostIntegrationConfig,
+        handlePostIntegrationConfigTest,
+      } = await import("./src/integration-config.mjs");
+
+      if (pathname === "/integration-config") {
+        if (req.method === "GET") {
+          await handleGetIntegrationConfig(req, res, query);
+        } else if (req.method === "POST") {
+          const body = await readJsonBody(req);
+          await handlePostIntegrationConfig(req, res, body);
+        } else {
+          sendJson(res, 405, { detail: "metodo non consentito" });
+        }
+        return;
+      }
+
+      if (pathname === "/integration-config/test") {
+        if (req.method === "POST") {
+          const body = await readJsonBody(req);
+          await handlePostIntegrationConfigTest(req, res, body);
+        } else {
+          sendJson(res, 405, { detail: "metodo non consentito" });
+        }
+        return;
+      }
+    }
+
     // Static serving sempre locale in entrambe le modalita': la discriminazione API-vs-static
     // usa i prefissi REST del contratto. In embedded il Router fa comunque match fine per
     // metodo+path (un GET su un prefisso REST senza route esatta torna 404 JSON, non static),

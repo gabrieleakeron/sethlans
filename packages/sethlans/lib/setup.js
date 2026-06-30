@@ -1,17 +1,16 @@
 // sethlans setup — standalone configuration wizard.
-// Bootstraps the machine-wide capabilities: plugin files, the local Sethlans
-// Board (SQLite/PostgreSQL) + its MCP, code intelligence (LSP), and — optionally
-// — the GLOBAL half of the integration MCPs (tickets/docs/code-quality): pick a
-// provider, store its token in an env var, and register the server `-s user`.
-// Each step can be configured, tested, saved, or skipped independently; a final
-// confirmation step writes the config to disk and prints a summary.
+// Bootstraps the machine-wide capabilities in four core steps:
+//   1. Plugin — copy skill/agent/MCP files into ~/.claude/
+//   2. Board  — start the local Sethlans Board (SQLite/PostgreSQL) and register
+//               its MCP server (-s user).
+//   3. LSP    — install agent-lsp / serena and the language backends
+//               (pylsp, typescript-language-server, jdtls).
+//   4. Confirm — write ~/.claude/sethlans-config.json and print a summary.
 //
-// The PER-PROJECT half of the integrations (which Jira key / repo / Confluence
-// space / Codacy project to act on) is intentionally NOT handled here — it is
-// recorded by /sethlans-onboard into .claude/project-profile.yaml, since this
-// wizard has no notion of "the current project". See sethlans-onboard.md §0-C.
+// Integration MCPs (tickets · docs · code quality) are NOT wired here.
+// They are configured per-project by /sethlans-onboard, which writes an
+// artifact that the PO/architect agents consume. See sethlans-onboard.md §0-C.
 import { execSync } from 'child_process'
-import https from 'node:https'
 import { homedir } from 'os'
 import { join } from 'path'
 import { ask, menu, confirm, close } from './prompts.js'
@@ -35,169 +34,6 @@ function runClaude(args) {
     console.log(`    Run it manually after setup completes.`)
     return false
   }
-}
-
-// Best-effort, output-swallowing `claude` call — used to drop a stale server
-// entry before re-registering, so re-running the wizard stays idempotent.
-function runClaudeQuiet(args) {
-  try { execSync(`claude ${args}`, { stdio: 'ignore' }); return true } catch { return false }
-}
-
-// Best-effort token probe (never throws). Hits the GitHub REST API with the
-// resolved token to confirm it's valid — catches expired/under-scoped PATs that
-// a mere "env var is visible" check would wave through.
-function probeGithub(token) {
-  return new Promise(resolve => {
-    const req = https.request({
-      host: 'api.github.com', path: '/user', method: 'GET',
-      headers: { 'User-Agent': 'sethlans-setup', Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' }
-    }, res => {
-      let body = ''
-      res.on('data', d => { body += d })
-      res.on('end', () => {
-        if (res.statusCode === 200) {
-          let login = ''
-          try { login = JSON.parse(body).login } catch {}
-          resolve({ ok: true, detail: login ? `authenticated as ${login}` : 'authenticated' })
-        } else {
-          resolve({ ok: false, detail: `GitHub returned HTTP ${res.statusCode} (token invalid or under-scoped)` })
-        }
-      })
-    })
-    req.on('error', e => resolve({ ok: false, detail: e.message }))
-    req.setTimeout(5000, () => { req.destroy(); resolve({ ok: false, detail: 'timeout reaching api.github.com' }) })
-    req.end()
-  })
-}
-
-// ── Integration MCP catalog (tickets · docs · code quality) ──────────────────
-// The golden rule (see code-quality-protocol.md): a token is NEVER written into
-// a config file. The user stores it in an environment variable (setx/export) and
-// we register the server with the literal ${VAR} placeholder, which Claude Code
-// resolves at launch. Only non-secret bits (URL, email) are passed inline.
-const INTEGRATION_SLOTS = [
-  { key: 'ticket', title: 'Tickets', providers: ['github', 'atlassian', 'linear'] },
-  { key: 'docs', title: 'Docs', providers: ['atlassian', 'notion', 'github-wiki'] },
-  { key: 'codeQuality', title: 'Code quality', providers: ['codacy', 'codescene', 'sonarqube'] }
-]
-
-const PROVIDERS = {
-  // The user stores a plain GITHUB_TOKEN (the de-facto standard, often already
-  // set for git/gh), but the official server reads GITHUB_PERSONAL_ACCESS_TOKEN,
-  // so we map one to the other via `mcpEnv`. Official image (the old
-  // @modelcontextprotocol/server-github is archived).
-  github: { server: 'github', env: 'GITHUB_TOKEN', mcpEnv: 'GITHUB_PERSONAL_ACCESS_TOKEN',
-    tokenHint: 'github.com → Settings → Developer settings → Personal access tokens → Fine-grained → Generate. On the target repos grant: Contents (Read-only), Pull requests (Read/Write), Issues (Read/Write), Metadata (Read-only)',
-    inline: [], probe: probeGithub,
-    pkg: ['docker', 'run', '-i', '--rm', '-e', 'GITHUB_PERSONAL_ACCESS_TOKEN', 'ghcr.io/github/github-mcp-server'] },
-  atlassian: { server: 'atlassian', env: 'ATLASSIAN_API_TOKEN',
-    tokenHint: 'id.atlassian.com → Security → API tokens → Create',
-    inline: [{ flag: 'ATLASSIAN_BASE_URL', q: 'Atlassian base URL (e.g. https://your.atlassian.net): ' },
-             { flag: 'ATLASSIAN_EMAIL', q: 'Atlassian account email: ' }],
-    pkg: ['npx', '-y', '@atlassian/mcp@latest'] },
-  linear: { server: 'linear', env: 'LINEAR_API_KEY',
-    tokenHint: 'linear.app → Settings → Security & access → Personal API keys → New key',
-    inline: [], pkg: ['npx', '-y', '@linear/mcp@latest'] },
-  notion: { server: 'notion', env: 'NOTION_API_TOKEN',
-    tokenHint: 'notion.so/my-integrations → New integration → copy the secret',
-    inline: [], pkg: ['npx', '-y', '@modelcontextprotocol/server-notion@latest'] },
-  'github-wiki': { server: null, env: null,
-    note: 'github-wiki has no global server or token — it is a per-project reference. Run /sethlans-onboard to record the wiki repo URL.' },
-  codacy: { server: 'codacy', env: 'CODACY_ACCOUNT_TOKEN',
-    tokenHint: 'Codacy → Account → Access Management → Create API token',
-    inline: [], pkg: ['npx', '-y', '@codacy/codacy-mcp@latest'] },
-  // CodeScene's MCP runs in a Docker container that must bind-mount the project
-  // tree to analyse it (CS_MOUNT_PATH + --mount). That path is per-workspace, so
-  // the server can't be registered once globally — `perProject: true` makes the
-  // wizard set up only the GLOBAL credentials (token + on-prem URL, both env
-  // vars) here, and defers the real `mcp add` (with the mount, at -s local) to
-  // /sethlans-onboard. See code-quality-protocol.md.
-  codescene: { server: 'codescene', env: 'CS_ACCESS_TOKEN', perProject: true, onPremEnv: 'CS_ONPREM_URL',
-    tokenHint: 'CodeScene Cloud → codescene.io/users/me/pat · on-prem → https://<your-cs-host>/configuration/user/token',
-    inline: [],
-    pkg: ['docker', 'run', '-i', '--rm', '-e', 'CS_ONPREM_URL', '-e', 'CS_ACCESS_TOKEN', 'codescene/codescene-mcp'] },
-  sonarqube: { server: 'sonarqube', env: 'SONARQUBE_TOKEN',
-    tokenHint: 'Sonar → My Account → Security → Generate Tokens',
-    inline: [{ flag: 'SONARQUBE_URL', q: 'SonarQube/SonarCloud URL: ' }],
-    pkg: ['<sonar-mcp-launch-command>'] }
-}
-
-// The value Claude Code must STORE is the literal "${VAR}". On POSIX sh we
-// single-quote it so the shell doesn't expand it at registration time; on
-// Windows cmd.exe ${VAR} isn't a variable syntax, so it passes through bare.
-function envPlaceholder(varName) {
-  return process.platform === 'win32' ? `\${${varName}}` : `'\${${varName}}'`
-}
-
-// Walk one provider through: create token → store as env var → register server.
-async function wireProvider(providerKey, slotKey, config) {
-  const p = PROVIDERS[providerKey]
-  if (!p) return
-  if (!p.server) { console.log(`  ${p.note}`); return }
-
-  console.log(`\n  ${providerKey}:`)
-  console.log(`  1. Create the token:  ${p.tokenHint}`)
-  const setCmd = process.platform === 'win32'
-    ? `setx ${p.env} "<token>"`
-    : `export ${p.env}="<token>"   # then add this line to ~/.zshrc or ~/.bashrc`
-  console.log(`  2. Store it in an environment variable, then open a NEW terminal:`)
-  console.log(`        ${setCmd}`)
-  const ready = await confirm(`     Done — is ${p.env} set?`, false)
-  if (!ready) {
-    console.log(`     Skipped ${providerKey} — set ${p.env} and re-run "sethlans setup --update" later.`)
-    return
-  }
-  if (process.env[p.env]) {
-    if (p.probe) {
-      const r = await p.probe(process.env[p.env])
-      console.log(r.ok ? `     ✔ Token works — ${r.detail}.` : `     ! Token check failed — ${r.detail}. Registering anyway; fix the token and re-run later.`)
-    }
-  } else {
-    console.log(`     ! ${p.env} isn't visible in this shell yet (setx/export only affects new processes).`)
-    console.log(`       Registering anyway — it resolves once you restart Claude Code + terminal.`)
-  }
-
-  // perProject providers (CodeScene): the server itself needs a per-workspace
-  // bind-mount, so we only ensure the GLOBAL credentials here and let
-  // /sethlans-onboard register the server (with the mount) at -s local.
-  if (p.perProject) {
-    if (p.onPremEnv) {
-      console.log(`     On-prem CodeScene? Store the instance URL globally too (skip for Cloud):`)
-      console.log(process.platform === 'win32'
-        ? `        setx ${p.onPremEnv} "https://<your-cs-host>"`
-        : `        export ${p.onPremEnv}="https://<your-cs-host>"   # then add to ~/.zshrc or ~/.bashrc`)
-    }
-    console.log(`     ✔ ${providerKey} credentials are global env vars (${p.env}${p.onPremEnv ? ` + ${p.onPremEnv}` : ''}).`)
-    console.log(`       The ${p.server} MCP server is registered per-workspace by /sethlans-onboard,`)
-    console.log(`       which bind-mounts the project tree into the container (a Docker MCP can't`)
-    console.log(`       see the host filesystem without an explicit --mount + CS_MOUNT_PATH).`)
-    config.mcps[slotKey] = providerKey
-    return
-  }
-
-  const inlineArgs = []
-  for (const item of (p.inline || [])) {
-    const v = (await ask(`     ${item.q}`)).trim()
-    if (v) inlineArgs.push(`-e ${item.flag}=${v}`)
-  }
-
-  // The env var the user stores (p.env) may differ from the one the MCP reads
-  // (p.mcpEnv) — e.g. GITHUB_TOKEN → GITHUB_PERSONAL_ACCESS_TOKEN. The -e flag
-  // carries the MCP-expected name; its value is the ${user-var} placeholder.
-  const mcpEnv = p.mcpEnv || p.env
-  const cmd = `mcp add ${p.server} -s user ${inlineArgs.join(' ')} -e ${mcpEnv}=${envPlaceholder(p.env)} -- ${p.pkg.join(' ')}`.replace(/\s+/g, ' ').trim()
-  if (p.pkg.some(a => a.includes('<'))) {
-    console.log(`     ${providerKey}'s launch command is vendor-specific — see code-quality-protocol.md.`)
-    console.log(`     Once you know it, run:  claude ${cmd}`)
-    config.mcps[slotKey] = providerKey
-    return
-  }
-  // Drop any prior user-scope entry so re-running the wizard doesn't duplicate
-  // or clash with a stale registration.
-  runClaudeQuiet(`mcp remove ${p.server} -s user`)
-  console.log(`     Registering: claude ${cmd}`)
-  runClaude(cmd)
-  config.mcps[slotKey] = providerKey
 }
 
 /**
@@ -387,62 +223,10 @@ async function stepLsp(config) {
   })
 }
 
-/**
- * Step 3 — Integrations (global half). Per slot (tickets/docs/code-quality):
- * pick a provider, walk the user through creating a token and storing it in an
- * env var (setx/export), then register the server `-s user` with a ${VAR}
- * placeholder — the secret never touches a config file. The per-project
- * reference is recorded later by /sethlans-onboard.
- */
-async function stepIntegrations(config) {
-  config.mcps = config.mcps || {}
-
-  return runStep('Step 3 — Integrations (tickets · docs · code quality, global)', {
-    isConfigured: () => Object.keys(config.mcps).length > 0,
-
-    async configure() {
-      console.log('  Optional MCP servers used by the subagents (PO, architect, reviewer).')
-      console.log('  Secrets stay in environment variables — never written to a config file.')
-      console.log('  The per-project reference (Jira key, repo, CQ project) is recorded later by /sethlans-onboard.')
-      for (const slot of INTEGRATION_SLOTS) {
-        const opts = [...slot.providers, 'Skip this slot']
-        const choice = await menu(`${slot.title} — which provider?`, opts)
-        if (choice === opts.length - 1) continue
-        await wireProvider(slot.providers[choice], slot.key, config)
-      }
-    },
-
-    async test() {
-      const entries = Object.entries(config.mcps)
-      if (!entries.length) { console.log('  No integration providers selected.'); return }
-      for (const [slot, prov] of entries) {
-        const p = PROVIDERS[prov]
-        const env = p?.env
-        if (!env) { console.log(`  ${slot}: ${prov} — no token (non-MCP)`); continue }
-        if (!process.env[env]) { console.log(`  ${slot}: ${prov} — ${env} NOT visible yet — restart your terminal`); continue }
-        if (p.probe) {
-          const r = await p.probe(process.env[env])
-          console.log(`  ${slot}: ${prov} — ${r.ok ? `✔ ${r.detail}` : `! ${r.detail}`}`)
-        } else {
-          console.log(`  ${slot}: ${prov} — ${env} visible (not probed)`)
-        }
-      }
-    },
-
-    async save() {
-      const entries = Object.entries(config.mcps)
-      console.log(entries.length
-        ? `  ✔ Providers recorded: ${entries.map(([s, p]) => `${s}:${p}`).join(', ')}. Restart Claude Code + terminal so tokens resolve.`
-        : '  No integration providers — wire them later via /sethlans-onboard.')
-    }
-  })
-}
-
 async function stepConfirm(config) {
   console.log('\n── Final step — Confirm & save ──')
   console.log(`  Board: ${config.board ? `${config.board.url} (${config.board.dbUrl ? 'PostgreSQL' : 'SQLite'})` : 'not configured'}`)
   console.log(`  LSP languages: ${config.lsp?.languages ? Object.entries(config.lsp.languages).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none' : 'not configured'}`)
-  console.log(`  Integrations: ${config.mcps && Object.keys(config.mcps).length ? Object.entries(config.mcps).map(([s, p]) => `${s}:${p}`).join(', ') : 'none'} (global servers; per-project refs via /sethlans-onboard)`)
 
   const ok = await confirm('Save this configuration?', true)
   if (ok) writeConfig(config)
@@ -480,7 +264,6 @@ export async function setup(args) {
 
   await stepBoard(config)
   await stepLsp(config)
-  await stepIntegrations(config)
 
   let saved = false
   while (!saved) {
@@ -499,7 +282,7 @@ export async function setup(args) {
   console.log('╚═══════════════════════════════════╝')
   console.log('\n')
   console.log(`Restart Claude Code, then:`)
-  console.log(`  /sethlans-onboard   ← configure the current project`)
+  console.log(`  /sethlans-onboard   ← configure the current project (tickets · docs · code quality)`)
   console.log(`  /sethlans <request> ← start the workflow\n`)
 
   close()

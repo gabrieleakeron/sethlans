@@ -32,10 +32,12 @@ sethlans setup
 
 The wizard:
 1. Copies the skills, agents, and protocol into `~/.claude/`.
-2. Install the `sethlans-board` : Local (Docker, SQLite/PostgreSQL) or remote URL.
-3. Registers the `sethlans-board` MCP server .
-4. Optionally configures a **ticket MCP** (Atlassian Jira, Linear, GitHub Issues), a **document
-   MCP** (Confluence, Notion), and a **code-quality MCP** (CodeScene, SonarQube, Codacy).
+2. Installs the `sethlans-board`: Local (Docker, SQLite/PostgreSQL) or remote URL.
+3. Registers the `sethlans-board` MCP server.
+4. Installs code-intelligence servers (agent-lsp, serena) and restarts Claude Code.
+
+Integrations (Jira, Confluence, Codacy, CodeScene…) are **not** configured here — they are set up
+per-project when you run `/sethlans-onboard`.
 
 Restart Claude Code after the wizard completes.
 
