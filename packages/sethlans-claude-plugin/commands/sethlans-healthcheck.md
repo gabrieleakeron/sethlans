@@ -113,16 +113,18 @@ Confluence space, repo, Codacy/CodeScene project) in `.claude/project-profile.ya
 the board `project.config`). They follow the [`code-quality-protocol.md`](code-quality-protocol.md)
 spirit: **optional, best-effort, never blocking** — report what's missing, don't force it.
 
-**There is one scope to check: global.** For each slot:
+**One scope to check: global — except codescene, which is per-workspace** (its Docker MCP needs a
+project bind-mount, so it lives at `-s local`, not `-s user`; see §3a and `code-quality-protocol.md`).
+For each slot:
 
 1. **Which provider** does this project use? Read `slots.<slot>.provider` from
    `.claude/project-profile.yaml` (fall back to the global default `mcps.<slot>` in
    `~/.claude/sethlans-config.json`). If neither is set, the slot is simply **not used** — report
    `– not used`, that is not an error.
-2. **Is the server wired globally?** Confirm the provider is registered at **user scope** in
-   `~/.claude.json` **and** its `mcp__<server>__*` tools are actually loaded in the session. A
-   config entry whose tools are absent means the server failed to start or needs auth (e.g. a
-   `/mcp` login).
+2. **Is the server wired?** Confirm the provider is registered (**user scope** in `~/.claude.json`
+   for every provider **except codescene**, which is at **`-s local`** for *this* workspace) **and**
+   its `mcp__<server>__*` tools are actually loaded in the session. A config entry whose tools are
+   absent means the server failed to start or needs auth (e.g. a `/mcp` login).
 3. **Is the project reference present?** Confirm `slots.<slot>.project` / `space` / `wiki_repo` is
    set (this is what the subagents act on).
 
@@ -147,6 +149,14 @@ For each wired server, do a best-effort liveness check (never fail the turn over
   the image/token state — don't pull blindly. GitHub stores `GITHUB_TOKEN` but the server reads
   `GITHUB_PERSONAL_ACCESS_TOKEN` (the registration maps one to the other); CodeScene uses
   `CS_ACCESS_TOKEN` (+ `CS_ONPREM_URL` for on-prem).
+  - **CodeScene mount check (the common failure):** the container can only analyse files that are
+    **bind-mounted** into it. Confirm the **`-s local`** `codescene` entry for this workspace carries
+    both `-e CS_MOUNT_PATH=<root>` **and** `--mount type=bind,src=<root>,dst=/mount/,ro`, and that
+    `<root>` actually **contains this project's repos** (matches `slots.codeQuality.mount_root`). A
+    `codescene` server with no mount, or one whose `<root>` doesn't cover the repos, is the cause of
+    *"the MCP runs in a Linux/Docker container that can't see the Windows filesystem `C:\…`"* — the
+    fix is to re-register it per §3a, not to touch the token. A global (`-s user`) codescene entry is
+    **wrong** by construction (no per-project mount) — flag it.
 - **github-wiki (no MCP)**: best-effort confirm the `wiki_repo` URL is set (and the `local_path`
   clone exists if recorded); auth rides on git creds, not re-verified here.
 
@@ -183,6 +193,26 @@ it. The fix depends on **what** is missing:
      `ghcr.io/github/github-mcp-server` and `codescene/codescene-mcp` Docker images.)
   Remind the user to **restart Claude Code and their terminal** so the env var resolves and the tools
   load. This is the same wiring `/sethlans-onboard` §0-C performs — running onboard also fixes it.
+  - **codescene exception — register per-workspace with a bind-mount, at `-s local`.** Confirm only
+    the global env vars (`CS_ACCESS_TOKEN`, plus `CS_ONPREM_URL` on-prem) are set, then register the
+    server for *this* workspace with the project mount. The **root** is the **common parent of this
+    project's repos** (one container covers a multi-repo workspace); fall back to one
+    `codescene-<repo>` server per repo if the repos live under unrelated roots. Drop the both
+    `CS_ONPREM_URL` lines for CodeScene Cloud, use forward slashes:
+    ```bash
+    claude mcp add codescene -s local \
+      -e CS_ACCESS_TOKEN='${CS_ACCESS_TOKEN}' \
+      -e CS_ONPREM_URL='${CS_ONPREM_URL}' \
+      -- docker run -i --rm \
+         -e CS_ACCESS_TOKEN -e CS_ONPREM_URL \
+         -e CS_MOUNT_PATH=<root> \
+         --mount type=bind,src=<root>,dst=/mount/,ro \
+         codescene/codescene-mcp
+    ```
+    If a `codescene` server is registered **without** a mount (or at `-s user`, or with a `<root>`
+    that doesn't cover the repos), **remove it** (`claude mcp remove codescene -s <user|local>`) and
+    re-register as above — this is the fix for the "container can't see `C:\…`" error. Record the
+    chosen root in `slots.codeQuality.mount_root`.
 - **Project reference missing** (server wired, but no Jira key / space / repo / CQ project for this
   repo) → the fix is **`/sethlans-onboard`** (its §0-C records `slots.<slot>` and mirrors it to the
   board `project.config`). This is also the only fix for the non-MCP `github-wiki` pointer.

@@ -102,13 +102,19 @@ scope** in `~/.claude.json`. There is **only one scope to check**: global.
   | **linear** | ticket | `LINEAR_API_KEY` | linear.app → **Settings** → **Security & access** → **Personal API keys** → **New key** | `claude mcp add linear -s user -e LINEAR_API_KEY='${LINEAR_API_KEY}' -- npx -y @linear/mcp@latest` |
   | **notion** | docs | `NOTION_API_TOKEN` | notion.so/my-integrations → **New integration** → copy the secret | `claude mcp add notion -s user -e NOTION_API_TOKEN='${NOTION_API_TOKEN}' -- npx -y @modelcontextprotocol/server-notion@latest` |
   | **codacy** | code quality | `CODACY_ACCOUNT_TOKEN` | Codacy → **Account** → **Access Management** → **Create API token** | `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN='${CODACY_ACCOUNT_TOKEN}' -- npx -y @codacy/codacy-mcp@latest` |
-  | **codescene** | code quality | `CS_ACCESS_TOKEN` | Cloud → **codescene.io/users/me/pat** · on-prem → `https://<host>/configuration/user/token` | `claude mcp add codescene -s user -e CS_ONPREM_URL=<url> -e CS_ACCESS_TOKEN='${CS_ACCESS_TOKEN}' -- docker run -i --rm -e CS_ONPREM_URL -e CS_ACCESS_TOKEN codescene/codescene-mcp` (drop `CS_ONPREM_URL` for Cloud) |
+  | **codescene** | code quality | `CS_ACCESS_TOKEN` (+ `CS_ONPREM_URL` on-prem) | Cloud → **codescene.io/users/me/pat** · on-prem → `https://<host>/configuration/user/token` | **Token/URL only here** (global env vars). CodeScene's MCP runs in Docker and must **bind-mount the project tree**, so the *server* is registered **per-workspace in Step 3** at `-s local`, **not** `-s user`. See `~/.claude/code-quality-protocol.md` → *CodeScene runs in Docker*. |
   | **sonarqube** | code quality | `SONARQUBE_TOKEN` | Sonar → **My Account** → **Security** → **Generate Tokens** | `claude mcp add sonarqube -s user -e SONARQUBE_URL=<url> -e SONARQUBE_TOKEN='${SONARQUBE_TOKEN}' -- <sonar-mcp-launch-command>` |
 
   > **GitHub env-var mapping:** the user stores the de-facto-standard `GITHUB_TOKEN`, but the
   > official `github-mcp-server` reads `GITHUB_PERSONAL_ACCESS_TOKEN` — hence the registration maps
   > one to the other (`-e GITHUB_PERSONAL_ACCESS_TOKEN='${GITHUB_TOKEN}'`). The old
   > `@modelcontextprotocol/server-github` npm package is archived; use the `ghcr.io` image above.
+
+  > **CodeScene is the exception to "wire globally `-s user`".** Its MCP runs in a Docker
+  > container that must **bind-mount the project tree** (`--mount` + `CS_MOUNT_PATH`) — a path that
+  > is per-workspace. So here you only ensure the **global env vars** are set (`CS_ACCESS_TOKEN`,
+  > plus `CS_ONPREM_URL` for on-prem); the **server itself is registered in Step 3** at `-s local`
+  > with the mount. Never register codescene `-s user` — one global path can't serve every repo.
 
   The full code-quality catalog (CodeScene/SonarQube/Codacy, plus Codacy's `codacy_cli_analyze`
   local analysis — needs **WSL** on Windows) lives in `~/.claude/code-quality-protocol.md`.
@@ -125,6 +131,25 @@ Ask **only** for the slot's reference and save it into `.claude/project-profile.
   Legacy `docs_space` stays valid.
 - **code quality** → `slots.codeQuality = { provider, project: <repo on the MCP> }`, mirrored to
   `roles.seth-reviewer.codeQuality`. Legacy `codeQuality_project` stays valid.
+  - **codescene only** — also **register the Docker MCP for this workspace** (it can't be global,
+    it needs a bind-mount). Decide the mount **root**: the **common parent of this project's repos**
+    (from the workspace layout in step 2) so a single container covers a multi-repo workspace; if the
+    repos live under unrelated roots, register one server per repo (`codescene-<repo>`) instead.
+    Skip if a `codescene` server is already registered for this workspace with the right mount.
+    Use forward slashes and run (Cloud → drop both `CS_ONPREM_URL` lines):
+    ```bash
+    claude mcp add codescene -s local \
+      -e CS_ACCESS_TOKEN='${CS_ACCESS_TOKEN}' \
+      -e CS_ONPREM_URL='${CS_ONPREM_URL}' \
+      -- docker run -i --rm \
+         -e CS_ACCESS_TOKEN -e CS_ONPREM_URL \
+         -e CS_MOUNT_PATH=<root> \
+         --mount type=bind,src=<root>,dst=/mount/,ro \
+         codescene/codescene-mcp
+    ```
+    Record the chosen root in `slots.codeQuality.mount_root` (and, for the multi-container case, the
+    per-repo server names) so `/sethlans-healthcheck` can verify it. `CS_ACCESS_TOKEN`/`CS_ONPREM_URL`
+    stay global env vars; `-s local` keeps the machine-specific path out of any committed file.
 
 These per-role pointers flow into the board's `project.config` in step 2 — this is how they reach
 the subagents.

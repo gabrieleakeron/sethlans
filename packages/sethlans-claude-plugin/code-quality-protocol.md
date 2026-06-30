@@ -73,7 +73,7 @@ var → (tool registers)*. `<url>` is the vendor instance URL (non-secret, inlin
 | Provider | Env var (set via `setx`/`export`) | Where the user creates the token | Registration the flow runs |
 |---|---|---|---|
 | **codacy** | `CODACY_ACCOUNT_TOKEN` | Codacy → your avatar → **Account** → **Access Management** → **Create API token** (account token) | `claude mcp add codacy -s user -e CODACY_ACCOUNT_TOKEN='${CODACY_ACCOUNT_TOKEN}' -- npx -y @codacy/codacy-mcp@latest` |
-| **codescene** | `CS_ACCESS_TOKEN` | Cloud → **codescene.io/users/me/pat** · on-prem → `https://<your-cs-host>/configuration/user/token` | `claude mcp add codescene -s user -e CS_ONPREM_URL=<url> -e CS_ACCESS_TOKEN='${CS_ACCESS_TOKEN}' -- docker run -i --rm -e CS_ONPREM_URL -e CS_ACCESS_TOKEN codescene/codescene-mcp` (omit the `CS_ONPREM_URL` for CodeScene Cloud) |
+| **codescene** | `CS_ACCESS_TOKEN` (+ `CS_ONPREM_URL` on-prem) | Cloud → **codescene.io/users/me/pat** · on-prem → `https://<your-cs-host>/configuration/user/token` | **Per-workspace** (needs a bind-mount) — see *CodeScene runs in Docker* below; **not** registered `-s user`. |
 | **sonarqube** | `SONARQUBE_TOKEN` | Sonar → **My Account** → **Security** → **Generate Tokens** | `claude mcp add sonarqube -s user -e SONARQUBE_URL=<url> -e SONARQUBE_TOKEN='${SONARQUBE_TOKEN}' -- <sonar-mcp-launch-command>` |
 
 > Commands are **current templates** — check the vendor's MCP docs for the exact package, transport
@@ -82,6 +82,44 @@ var → (tool registers)*. `<url>` is the vendor instance URL (non-secret, inlin
 The Sethlans `plugin.json` intentionally does **not** ship a code-quality server in its
 `mcpServers` (it would fail to connect for users without the vendor/token). It is always wired
 on demand by the flows above, at **user scope**, following this golden rule.
+
+### CodeScene runs in Docker — the server is per-workspace, only the token is global
+CodeScene's MCP (`codescene/codescene-mcp`) runs in a **Linux Docker container**. To review files it
+must **bind-mount the project tree** into the container and be told the host-side root via
+`CS_MOUNT_PATH`. Without the mount the container sees nothing — on Windows this surfaces as
+*"the MCP runs in a Linux/Docker container that can't see the Windows filesystem `C:\…`"*. So
+CodeScene splits across two scopes:
+
+- **Global (one-time, shared by every repo):** the credentials, as **environment variables** —
+  `CS_ACCESS_TOKEN` (the secret) and, for on-prem, `CS_ONPREM_URL` (the instance URL). The user
+  `setx`/`export`s them once; they are **never** baked into a config file. `sethlans setup` Step 3
+  only sets these up for CodeScene — it does **not** register the server.
+- **Per-workspace (registered by `/sethlans-onboard`, scope `-s local`):** the server itself, with
+  the project bind-mount. The absolute path is machine-specific, so it goes to `-s local` (the
+  per-project `.claude.json`), **never** `-s user` (one global path can't serve every repo) and
+  **never** `-s project` (don't commit a machine path):
+
+  ```bash
+  # <root> = the workspace root to expose (forward slashes). Token/URL ride through
+  # from the global env vars via the '${VAR}' placeholders; CS_MOUNT_PATH + --mount
+  # carry the (non-secret) path directly.
+  claude mcp add codescene -s local \
+    -e CS_ACCESS_TOKEN='${CS_ACCESS_TOKEN}' \
+    -e CS_ONPREM_URL='${CS_ONPREM_URL}' \
+    -- docker run -i --rm \
+       -e CS_ACCESS_TOKEN -e CS_ONPREM_URL \
+       -e CS_MOUNT_PATH=<root> \
+       --mount type=bind,src=<root>,dst=/mount/,ro \
+       codescene/codescene-mcp
+  # CodeScene Cloud: drop both CS_ONPREM_URL lines.
+  ```
+
+- **Multi-repo workspaces:** `CS_MOUNT_PATH` is a **single** root, so the default is **one container
+  mounting the common parent** of the project's repos (e.g. `C:/sviluppo/devgit/alkyra` containing
+  `api/`, `ui/`) — then `<root>` = that parent and one `codescene` server covers all repos. Only if
+  the repos live under **unrelated roots** does onboard fall back to one server per repo
+  (`codescene-<repo>`, each with its own `CS_MOUNT_PATH`). Use forward slashes in the path even on
+  Windows.
 
 ## Local analysis through an MCP — Codacy `codacy_cli_analyze`
 

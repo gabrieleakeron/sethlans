@@ -106,9 +106,15 @@ const PROVIDERS = {
   codacy: { server: 'codacy', env: 'CODACY_ACCOUNT_TOKEN',
     tokenHint: 'Codacy → Account → Access Management → Create API token',
     inline: [], pkg: ['npx', '-y', '@codacy/codacy-mcp@latest'] },
-  codescene: { server: 'codescene', env: 'CS_ACCESS_TOKEN',
+  // CodeScene's MCP runs in a Docker container that must bind-mount the project
+  // tree to analyse it (CS_MOUNT_PATH + --mount). That path is per-workspace, so
+  // the server can't be registered once globally — `perProject: true` makes the
+  // wizard set up only the GLOBAL credentials (token + on-prem URL, both env
+  // vars) here, and defers the real `mcp add` (with the mount, at -s local) to
+  // /sethlans-onboard. See code-quality-protocol.md.
+  codescene: { server: 'codescene', env: 'CS_ACCESS_TOKEN', perProject: true, onPremEnv: 'CS_ONPREM_URL',
     tokenHint: 'CodeScene Cloud → codescene.io/users/me/pat · on-prem → https://<your-cs-host>/configuration/user/token',
-    inline: [{ flag: 'CS_ONPREM_URL', q: 'CodeScene on-prem URL (leave empty for CodeScene Cloud): ' }],
+    inline: [],
     pkg: ['docker', 'run', '-i', '--rm', '-e', 'CS_ONPREM_URL', '-e', 'CS_ACCESS_TOKEN', 'codescene/codescene-mcp'] },
   sonarqube: { server: 'sonarqube', env: 'SONARQUBE_TOKEN',
     tokenHint: 'Sonar → My Account → Security → Generate Tokens',
@@ -149,6 +155,24 @@ async function wireProvider(providerKey, slotKey, config) {
   } else {
     console.log(`     ! ${p.env} isn't visible in this shell yet (setx/export only affects new processes).`)
     console.log(`       Registering anyway — it resolves once you restart Claude Code + terminal.`)
+  }
+
+  // perProject providers (CodeScene): the server itself needs a per-workspace
+  // bind-mount, so we only ensure the GLOBAL credentials here and let
+  // /sethlans-onboard register the server (with the mount) at -s local.
+  if (p.perProject) {
+    if (p.onPremEnv) {
+      console.log(`     On-prem CodeScene? Store the instance URL globally too (skip for Cloud):`)
+      console.log(process.platform === 'win32'
+        ? `        setx ${p.onPremEnv} "https://<your-cs-host>"`
+        : `        export ${p.onPremEnv}="https://<your-cs-host>"   # then add to ~/.zshrc or ~/.bashrc`)
+    }
+    console.log(`     ✔ ${providerKey} credentials are global env vars (${p.env}${p.onPremEnv ? ` + ${p.onPremEnv}` : ''}).`)
+    console.log(`       The ${p.server} MCP server is registered per-workspace by /sethlans-onboard,`)
+    console.log(`       which bind-mounts the project tree into the container (a Docker MCP can't`)
+    console.log(`       see the host filesystem without an explicit --mount + CS_MOUNT_PATH).`)
+    config.mcps[slotKey] = providerKey
+    return
   }
 
   const inlineArgs = []
