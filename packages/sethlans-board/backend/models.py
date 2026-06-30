@@ -184,8 +184,9 @@ class Story(Base):
     md: Mapped[str] = mapped_column(Text, default="", server_default="")
     md_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    def to_dict(self, mockup_descendant_count: int | None = None) -> dict:
-        own = count_mockups(self.md)
+    def to_dict(self, mockup_count: int | None = None, mockup_descendant_count: int | None = None) -> dict:
+        # mockup_count: passato da server.py usando _owner_mockup_count; se None, fallback legacy.
+        own = count_mockups(self.md) if mockup_count is None else mockup_count
         return {
             "id": self.id,
             "title": self.title,
@@ -215,7 +216,8 @@ class Task(Base):
     md: Mapped[str] = mapped_column(Text, default="", server_default="")
     md_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    def to_dict(self) -> dict:
+    def to_dict(self, mockup_count: int | None = None) -> dict:
+        # mockup_count: passato da server.py usando _owner_mockup_count; se None, fallback legacy.
         return {
             "id": self.id,
             "title": self.title,
@@ -225,7 +227,7 @@ class Task(Base):
             "md": self.md or "",
             "md_updated_at": self.md_updated_at.isoformat() if self.md_updated_at else None,
             # Derivato (D3, C0): read-only, calcolato a runtime, non persistito.
-            "mockup_count": count_mockups(self.md),
+            "mockup_count": count_mockups(self.md) if mockup_count is None else mockup_count,
         }
 
 

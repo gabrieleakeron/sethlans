@@ -30,6 +30,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from db import SessionLocal
@@ -309,34 +310,92 @@ def apply_md_timestamp(obj, patch_dict):
 # ---------- Helper conteggi mockup derivati (C0, D3) ----------
 # Calcolati in memoria a partire dai dati già caricati, per evitare query N+1.
 
-def _story_mockup_descendant_count(story: Story, tasks: list[Task]) -> int:
-    return count_mockups(story.md) + sum(count_mockups(t.md) for t in tasks)
+
+def _entity_mockup_counts(db: Session) -> dict[tuple[str, str], int]:
+    """Carica in una sola query il numero di righe Mockup per ogni (owner_type, owner_id).
+
+    Ritorna un dict {(owner_type, owner_id): n} usato da tutti i call site di
+    serializzazione per evitare query N+1 (una query sola per intera richiesta).
+    """
+    rows = (
+        db.query(Mockup.owner_type, Mockup.owner_id, func.count())
+        .group_by(Mockup.owner_type, Mockup.owner_id)
+        .all()
+    )
+    return {(ot, oid): n for ot, oid, n in rows}
+
+
+def _owner_mockup_count(
+    entity_counts: dict[tuple[str, str], int], owner_type: str, owner_obj
+) -> int:
+    """Conteggio mockup per un singolo owner, coerente con _mockups_for_owner.
+
+    Se l'owner ha righe nella tabella mockups → restituisce quel numero.
+    Altrimenti → fallback sui blocchi ```mockup``` nel campo md (legacy pre-backfill).
+    Non somma mai entrambi: evita il doppio conteggio su owner già parzialmente migrati.
+    """
+    n = entity_counts.get((owner_type, owner_obj.id), 0)
+    return n if n > 0 else count_mockups(owner_obj.md)
+
+
+def _story_mockup_descendant_count(
+    story: Story, tasks: list[Task], entity_counts: dict[tuple[str, str], int]
+) -> int:
+    """Totale mockup della story (propri + task discendenti), usando entity_counts."""
+    return _owner_mockup_count(entity_counts, "story", story) + sum(
+        _owner_mockup_count(entity_counts, "task", t) for t in tasks
+    )
 
 
 def _epic_mockup_descendant_count(
-    epic: Epic, stories: list[Story], tasks_by_story: dict[str, list[Task]]
+    epic: Epic,
+    stories: list[Story],
+    tasks_by_story: dict[str, list[Task]],
+    entity_counts: dict[tuple[str, str], int],
 ) -> int:
-    # Include i mockup nella md propria dell'epic (D3) oltre a quelli della discendenza
-    # story/task — stesso principio già applicato a Story (mockup_count + descendant_count).
+    """Totale mockup dell'epic (propri + story + task discendenti), usando entity_counts.
+
+    L'epic stesso non ha righe nella tabella mockups (MOCKUP_OWNER non include "epic"),
+    quindi per la quota propria dell'epic si usa sempre il fallback legacy count_mockups(md).
+    """
     total = count_mockups(epic.md)
     for s in stories:
-        total += _story_mockup_descendant_count(s, tasks_by_story.get(s.id, []))
+        total += _story_mockup_descendant_count(s, tasks_by_story.get(s.id, []), entity_counts)
     return total
 
 
-def _story_to_dict(db: Session, story: Story) -> dict:
+def _story_to_dict(db: Session, story: Story, entity_counts: dict[tuple[str, str], int] | None = None) -> dict:
+    """Serializza una Story con mockup_count e mockup_descendant_count aggiornati.
+
+    Se entity_counts non è fornito, lo calcola dalla DB (utile per i singoli GET).
+    Nei list endpoint e in /state è preferibile passarlo già calcolato (una sola query).
+    """
+    if entity_counts is None:
+        entity_counts = _entity_mockup_counts(db)
     tasks = db.query(Task).filter(Task.story_id == story.id).all()
-    return story.to_dict(mockup_descendant_count=_story_mockup_descendant_count(story, tasks))
+    own = _owner_mockup_count(entity_counts, "story", story)
+    return story.to_dict(
+        mockup_count=own,
+        mockup_descendant_count=_story_mockup_descendant_count(story, tasks, entity_counts),
+    )
 
 
-def _epic_to_dict(db: Session, epic: Epic) -> dict:
+def _epic_to_dict(db: Session, epic: Epic, entity_counts: dict[tuple[str, str], int] | None = None) -> dict:
+    """Serializza un Epic con mockup_descendant_count aggiornato.
+
+    Se entity_counts non è fornito, lo calcola dalla DB (utile per i singoli GET).
+    """
+    if entity_counts is None:
+        entity_counts = _entity_mockup_counts(db)
     stories = db.query(Story).filter(Story.epic_id == epic.id).all()
     story_ids = [s.id for s in stories]
     tasks_by_story: dict[str, list[Task]] = {sid: [] for sid in story_ids}
     if story_ids:
         for t in db.query(Task).filter(Task.story_id.in_(story_ids)).all():
             tasks_by_story.setdefault(t.story_id, []).append(t)
-    return epic.to_dict(mockup_descendant_count=_epic_mockup_descendant_count(epic, stories, tasks_by_story))
+    return epic.to_dict(
+        mockup_descendant_count=_epic_mockup_descendant_count(epic, stories, tasks_by_story, entity_counts)
+    )
 
 
 # ---------- PROJECTS ----------
@@ -390,7 +449,9 @@ def list_epics(status: Optional[str] = None, project_id: Optional[str] = None,
         q = q.filter(Epic.status == status)
     if project_id:
         q = q.filter(Epic.project_id == project_id)
-    return [_epic_to_dict(db, e) for e in q.all()]
+    # Calcola entity_counts una volta sola per evitare N query sul list
+    ec = _entity_mockup_counts(db)
+    return [_epic_to_dict(db, e, entity_counts=ec) for e in q.all()]
 
 @app.post("/epics", status_code=201)
 def create_epic(body: EpicIn, db: Session = Depends(get_db)):
@@ -402,7 +463,7 @@ def create_epic(body: EpicIn, db: Session = Depends(get_db)):
         md_updated_at=_now() if body.md else None,
     )
     db.add(epic); db.commit()
-    return epic.to_dict()
+    return _epic_to_dict(db, epic)
 
 @app.get("/epics/{epic_id}")
 def get_epic(epic_id: str, db: Session = Depends(get_db)):
@@ -443,7 +504,9 @@ def list_stories(epic_id: Optional[str] = None, status: Optional[str] = None,
         q = q.filter(Story.status == status)
     if phase:
         q = q.filter(Story.phase == phase)
-    return [_story_to_dict(db, s) for s in q.all()]
+    # Calcola entity_counts una volta sola per evitare N query sul list
+    ec = _entity_mockup_counts(db)
+    return [_story_to_dict(db, s, entity_counts=ec) for s in q.all()]
 
 @app.post("/stories", status_code=201)
 def create_story(body: StoryIn, db: Session = Depends(get_db)):
@@ -456,7 +519,9 @@ def create_story(body: StoryIn, db: Session = Depends(get_db)):
         md_updated_at=_now() if body.md else None,
     )
     db.add(story); db.commit()
-    return story.to_dict()
+    # Dopo la creazione non ci sono ancora righe entità Mockup: il fallback legacy è corretto.
+    # Usiamo _story_to_dict per coerenza con gli altri endpoint.
+    return _story_to_dict(db, story)
 
 @app.get("/stories/{story_id}")
 def get_story(story_id: str, db: Session = Depends(get_db)):
@@ -494,7 +559,9 @@ def list_tasks(story_id: Optional[str] = None, status: Optional[str] = None,
         q = q.filter(Task.status == status)
     if agent_id:
         q = q.filter(Task.agent_id == agent_id)
-    return [t.to_dict() for t in q.all()]
+    # Calcola entity_counts una volta sola per evitare N query sul list
+    ec = _entity_mockup_counts(db)
+    return [t.to_dict(mockup_count=_owner_mockup_count(ec, "task", t)) for t in q.all()]
 
 @app.post("/tasks", status_code=201)
 def create_task(body: TaskIn, db: Session = Depends(get_db)):
@@ -507,11 +574,14 @@ def create_task(body: TaskIn, db: Session = Depends(get_db)):
         agent_id=body.agent_id, md=body.md, md_updated_at=_now() if body.md else None,
     )
     db.add(task); db.commit()
-    return task.to_dict()
+    ec = _entity_mockup_counts(db)
+    return task.to_dict(mockup_count=_owner_mockup_count(ec, "task", task))
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: str, db: Session = Depends(get_db)):
-    return fetch_or_404(db, Task, task_id).to_dict()
+    task = fetch_or_404(db, Task, task_id)
+    ec = _entity_mockup_counts(db)
+    return task.to_dict(mockup_count=_owner_mockup_count(ec, "task", task))
 
 @app.patch("/tasks/{task_id}")
 def update_task(task_id: str, body: TaskPatch, db: Session = Depends(get_db)):
@@ -526,7 +596,8 @@ def update_task(task_id: str, body: TaskPatch, db: Session = Depends(get_db)):
     for k, v in data.items():
         setattr(task, k, v)
     db.commit()
-    return task.to_dict()
+    ec = _entity_mockup_counts(db)
+    return task.to_dict(mockup_count=_owner_mockup_count(ec, "task", task))
 
 @app.delete("/tasks/{task_id}")
 def delete_task(task_id: str, db: Session = Depends(get_db)):
@@ -967,7 +1038,10 @@ def full_state(db: Session = Depends(get_db)):
     stories = db.query(Story).all()
     tasks = db.query(Task).all()
 
-    # Tutto già in memoria: aggrego i conteggi derivati senza ulteriori query (D3, C0).
+    # Calcola entity_counts una sola volta per intera richiesta (anti-N+1).
+    ec = _entity_mockup_counts(db)
+
+    # Aggrego in memoria i riferimenti gerarchici senza ulteriori query (D3, C0).
     tasks_by_story: dict[str, list[Task]] = {}
     for t in tasks:
         tasks_by_story.setdefault(t.story_id, []).append(t)
@@ -980,20 +1054,23 @@ def full_state(db: Session = Depends(get_db)):
         "epics": [
             e.to_dict(
                 mockup_descendant_count=_epic_mockup_descendant_count(
-                    e, stories_by_epic.get(e.id, []), tasks_by_story,
+                    e, stories_by_epic.get(e.id, []), tasks_by_story, ec,
                 )
             )
             for e in epics
         ],
         "stories": [
             s.to_dict(
+                mockup_count=_owner_mockup_count(ec, "story", s),
                 mockup_descendant_count=_story_mockup_descendant_count(
-                    s, tasks_by_story.get(s.id, []),
-                )
+                    s, tasks_by_story.get(s.id, []), ec,
+                ),
             )
             for s in stories
         ],
-        "tasks":          [t.to_dict() for t in tasks],
+        "tasks": [
+            t.to_dict(mockup_count=_owner_mockup_count(ec, "task", t)) for t in tasks
+        ],
         "agents":         [a.to_dict() for a in db.query(Agent).all()],
         "knowledge":      [k.to_dict() for k in db.query(Knowledge).all()],
         "mockup_comments": [c.to_dict() for c in db.query(MockupComment).all()],
