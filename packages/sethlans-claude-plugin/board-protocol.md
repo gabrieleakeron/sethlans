@@ -61,7 +61,7 @@ proxy):
 | `sethlans_board_create_task` | Create a task under a story; assign by `agent_name` (find-or-register) or `agent_id`. |
 | `sethlans_board_set_status` | Set `status` of an epic/story/task (and `phase` for stories). |
 | `sethlans_board_get_or_register_agent` | Find-or-register an agent by name; optionally patch `status/current_task/tokens`. |
-| `sethlans_board_add_agent_tokens` | Increment an agent's cumulative `tokens` (read-modify-write). |
+| `sethlans_board_add_agent_tokens` | Increment an agent's cumulative `tokens` (read-modify-write); optional `task_id` also bumps that task's `tokens` for per-story aggregation. |
 | `sethlans_board_append_md` | Append text to the `md` of any entity (read-modify-write). |
 | `sethlans_board_request` | Low-level escape hatch: arbitrary REST call (only for cases not covered above). |
 
@@ -80,13 +80,41 @@ Typical flow with the tools: `sethlans_board_upsert_project` → `sethlans_board
 ## Data model (exact fields)
 - **epic**: `id, title, desc, status, md, md_updated_at` — status ∈ `{todo, progress, done}`
 - **story**: `id, title, desc, status, phase, epic_id, md, md_updated_at` — status ∈ `{todo, progress, done}`, phase ∈ `{analysis, ux, design, dev, done}`
-- **task**: `id, title, status, story_id, agent_id?, md, md_updated_at` — status ∈ `{todo, progress, done}`
+- **task**: `id, title, status, story_id, agent_id?, md, md_updated_at, tokens` — status ∈ `{todo, progress, done}`
 - **agent**: `id, name, current_task, status, tokens` — status ∈ `{active, idle}`
 
 `md` is the associated Markdown document (analysis for stories, description +
 architectural choices + work notes for tasks). `md_updated_at` is set by the
 server when the `md` changes. IDs are server-generated (prefix `e/s/t/a` +
 8 hex): **do not invent them**, always use the `id` returned by the POSTs or read from the GETs.
+
+### Task tokens — per-story aggregation (story `s36b99979`)
+`task.tokens` (Integer, default `0`) is **distinct** from the agent's cumulative `tokens`:
+it tracks how many tokens were spent on that specific task, and exists to power a
+per-story view without touching the agent's global counter.
+- **`GET /stories/{story_id}/agent-tokens`** — 404 if the story doesn't exist. Aggregates
+  `SUM(task.tokens) GROUP BY task.agent_id` over the story's tasks (tasks with `agent_id
+  IS NULL` are excluded), joined with `agent` for name/status/current_task. Response:
+  ```json
+  {
+    "story_id": "s36b99979",
+    "total_tokens": 41000,
+    "agents": [
+      { "agent_id": "a1b2c3d4", "name": "seth-frontend", "status": "active",
+        "current_task": "...", "story_tokens": 26000, "tokens": 512000 }
+    ]
+  }
+  ```
+  `story_tokens` = tokens spent by that agent on **this story only**; `tokens` = the
+  agent's global cumulative (unchanged meaning). Sorted by `story_tokens` DESC, then
+  `name` ASC. An agent with no tasks on the story is omitted; an empty/tokenless story
+  returns `{"story_id": ..., "total_tokens": 0, "agents": []}`.
+- The global `GET /agents` and `GET /state.agents` are **unaffected** — still the
+  unfiltered, cumulative-per-agent view used by the dashboard.
+- The Agents tab (`frontend/src/components/Agents.jsx`, mounted only inside
+  `StoryPage.jsx`) accepts an optional `storyId` prop: when set, it fetches this endpoint
+  and renders scope-coherent counters + a per-story token box instead of the global
+  cumulative; without it, behaviour is unchanged (dashboard-style, `state.agents`).
 
 ### Mockups are a first-class entity — NOT blocks in the `md`
 Mockups are **no longer written as ` ```mockup ` HTML blocks inside a story/task `md`**.
@@ -231,6 +259,6 @@ if ($tasks.Count -gt 0 -and ($tasks | Where-Object { $_.status -ne 'done' }).Cou
 
 ## Operational notes
 - To **release** a task from an agent: the PATCH ignores `null` fields, so you cannot clear `agent_id` via PATCH — reassign it to another agent or leave it unchanged.
-- `tokens`: it is populated by **the orchestrator** (not the subagents, which do not know their own consumption) with a **cumulative estimate** at the close of each subagent — `GET` the current value, add the estimate, `PATCH`. It is best-effort and approximate; if the board does not respond, leave it unchanged.
+- `agent.tokens`: it is populated by **the orchestrator** (not the subagents, which do not know their own consumption) with a **cumulative estimate** at the close of each subagent — `GET` the current value, add the estimate, `PATCH` (or use `sethlans_board_add_agent_tokens`). It is best-effort and approximate; if the board does not respond, leave it unchanged. Pass `task_id` to the same call when the estimate should also be attributed to a specific task (feeds `GET /stories/{id}/agent-tokens`); this is optional and independent of the global increment, which always happens regardless of whether the task-side update succeeds.
 - States: use **exactly** the enum values above, otherwise the server responds 422.
 - Run the state PATCHes at the start and end of the work, not at every micro-step (avoid noise on the board).

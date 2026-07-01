@@ -55,7 +55,7 @@ export default function StoryPage({ state, reload, storyId, drag, setDrag }) {
           setDrag={setDrag}
         />
       )}
-      {tab === "agents" && <Agents state={state} reload={reload} />}
+      {tab === "agents" && <Agents state={state} reload={reload} storyId={storyId} />}
       {tab === "doc" && (
         <div style={{ padding: "4px 2px" }}>
           <MdEditor value={story.md} onSave={saveMd} />

@@ -65,7 +65,12 @@ function resource(name) {
 
 export const projects = resource("projects");
 export const epics = resource("epics");
-export const stories = resource("stories");
+export const stories = {
+  ...resource("stories"),
+  // Token per-storia aggregati per agent (story s36b99979): alimenta il tab
+  // Agents quando aperto nel contesto di una storia (vedi components/Agents.jsx).
+  agentTokens: (storyId) => request("GET", `/stories/${storyId}/agent-tokens`),
+};
 export const tasks = resource("tasks");
 export const agents = resource("agents");
 export const knowledge = resource("knowledge");

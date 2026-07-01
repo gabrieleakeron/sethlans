@@ -354,18 +354,46 @@ const TOOLS = [
     name: "sethlans_board_add_agent_tokens",
     description:
       "Incrementa (read-modify-write) i token cumulativi di un agente identificato per " +
-      "nome. Best-effort: usato dall'orchestratore alla chiusura di un subagent.",
+      "nome. Best-effort: usato dall'orchestratore alla chiusura di un subagent. Se si " +
+      "passa task_id, incrementa (read-modify-write) ANCHE Task.tokens dello stesso delta " +
+      "(story s36b99979, per l'aggregazione token per-storia); story_id è opzionale, solo " +
+      "per telemetria/validazione, non persiste nulla da solo. Retrocompatibile: la firma " +
+      "storica {name, delta} continua a funzionare invariata.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "Nome canonico dell'agente." },
         delta: { type: "integer", description: "Quantità da sommare ai token attuali." },
+        task_id: {
+          type: "string",
+          description:
+            "Opzionale. Se presente, incrementa anche i token del task (Task.tokens) dello " +
+            "stesso delta, per abilitare l'aggregazione per-storia. Best-effort: un errore su " +
+            "questo passo non blocca l'incremento globale sull'agente.",
+        },
+        story_id: {
+          type: "string",
+          description:
+            "Opzionale, solo telemetria/validazione: i token per-storia derivano sempre dai " +
+            "task (via task_id), non da questo campo.",
+        },
       },
       required: ["name", "delta"],
     },
-    handler: async ({ name, delta }) => {
+    handler: async ({ name, delta, task_id, story_id }) => {
       const agent = await getOrRegisterAgent(name);
-      return api("PATCH", `/agents/${agent.id}`, { tokens: (agent.tokens || 0) + delta });
+      const result = await api("PATCH", `/agents/${agent.id}`, { tokens: (agent.tokens || 0) + delta });
+      if (task_id) {
+        try {
+          const task = await api("GET", `/tasks/${task_id}`);
+          await api("PATCH", `/tasks/${task_id}`, { tokens: (task.tokens || 0) + delta });
+        } catch (err) {
+          // Best-effort (D-C): il fallimento sull'aggiornamento del task non deve invalidare
+          // l'incremento globale già applicato sopra.
+          result._task_tokens_warning = `task_id '${task_id}' non aggiornato: ${err.message}`;
+        }
+      }
+      return result;
     },
   },
 

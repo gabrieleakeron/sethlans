@@ -215,6 +215,11 @@ class Task(Base):
     )
     md: Mapped[str] = mapped_column(Text, default="", server_default="")
     md_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Token consumati per QUESTO task (story s36b99979): a differenza di `Agent.tokens`
+    # (cumulativo globale per agent, invariato), questo valore alimenta l'aggregazione
+    # per-storia via GROUP BY su Task.agent_id (endpoint GET /stories/{id}/agent-tokens).
+    # Nessun backfill: i task esistenti partono da 0 (server_default "0").
+    tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     def to_dict(self, mockup_count: int | None = None) -> dict:
         # mockup_count: passato da server.py usando _owner_mockup_count; se None, fallback legacy.
@@ -226,6 +231,7 @@ class Task(Base):
             "agent_id": self.agent_id,
             "md": self.md or "",
             "md_updated_at": self.md_updated_at.isoformat() if self.md_updated_at else None,
+            "tokens": self.tokens,
             # Derivato (D3, C0): read-only, calcolato a runtime, non persistito.
             "mockup_count": count_mockups(self.md) if mockup_count is None else mockup_count,
         }

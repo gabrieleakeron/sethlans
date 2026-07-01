@@ -133,12 +133,29 @@ class StoryPatch(BaseModel):
     md: Optional[str] = None
 
 
+class StoryAgentTokens(BaseModel):
+    """Riga di aggregazione per un singolo agente nell'endpoint agent-tokens (story `s36b99979`)."""
+    agent_id: str
+    name: str
+    status: str
+    current_task: str
+    story_tokens: int
+    tokens: int
+
+class StoryAgentTokensOut(BaseModel):
+    """Response di `GET /stories/{story_id}/agent-tokens`: token per-storia aggregati per agent."""
+    story_id: str
+    total_tokens: int
+    agents: list[StoryAgentTokens]
+
+
 class TaskIn(BaseModel):
     title: str
     status: str = "todo"
     story_id: str
     agent_id: Optional[str] = None
     md: str = ""
+    tokens: int = 0
 
 class TaskPatch(BaseModel):
     title: Optional[str] = None
@@ -146,6 +163,7 @@ class TaskPatch(BaseModel):
     story_id: Optional[str] = None
     agent_id: Optional[str] = None
     md: Optional[str] = None
+    tokens: Optional[int] = None
 
 
 class AgentIn(BaseModel):
@@ -547,6 +565,39 @@ def delete_story(story_id: str, db: Session = Depends(get_db)):
     return {"deleted": story_id}
 
 
+@app.get("/stories/{story_id}/agent-tokens", response_model=StoryAgentTokensOut)
+def get_story_agent_tokens(story_id: str, db: Session = Depends(get_db)):
+    """Token consumati per QUESTA storia, aggregati per agent (story `s36b99979`).
+
+    Aggregazione `SUM(Task.tokens) GROUP BY Task.agent_id` sui task della storia
+    (una sola query, niente N+1), join su Agent per name/status/current_task.
+    Task con `agent_id IS NULL` sono esclusi dall'aggregazione. `tokens` nella
+    riga è il cumulativo GLOBALE dell'agent (invariato), `story_tokens` è la
+    somma limitata a questa storia. Ordinamento: story_tokens DESC, name ASC.
+    """
+    fetch_or_404(db, Story, story_id)
+    rows = (
+        db.query(
+            Agent.id, Agent.name, Agent.status, Agent.current_task, Agent.tokens,
+            func.sum(Task.tokens).label("story_tokens"),
+        )
+        .join(Task, Task.agent_id == Agent.id)
+        .filter(Task.story_id == story_id, Task.agent_id.isnot(None))
+        .group_by(Agent.id, Agent.name, Agent.status, Agent.current_task, Agent.tokens)
+        .order_by(func.sum(Task.tokens).desc(), Agent.name.asc())
+        .all()
+    )
+    agents = [
+        StoryAgentTokens(
+            agent_id=agent_id, name=name, status=status, current_task=current_task,
+            story_tokens=int(story_tokens or 0), tokens=tokens,
+        )
+        for agent_id, name, status, current_task, tokens, story_tokens in rows
+    ]
+    total_tokens = sum(a.story_tokens for a in agents)
+    return StoryAgentTokensOut(story_id=story_id, total_tokens=total_tokens, agents=agents)
+
+
 # ---------- TASKS ----------
 
 @app.get("/tasks")
@@ -572,6 +623,7 @@ def create_task(body: TaskIn, db: Session = Depends(get_db)):
     task = Task(
         id=new_id("t"), title=body.title, status=body.status, story_id=body.story_id,
         agent_id=body.agent_id, md=body.md, md_updated_at=_now() if body.md else None,
+        tokens=body.tokens,
     )
     db.add(task); db.commit()
     ec = _entity_mockup_counts(db)

@@ -1,19 +1,76 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, Activity, Zap } from "lucide-react";
 import * as api from "../api.js";
 import { READONLY } from "../config.js";
 
 // Agent grid: status, current task, tokens consumed.
-export default function Agents({ state, reload }) {
+//
+// Scope (story s36b99979): senza `storyId` questo componente resta il
+// comportamento storico — cumulativo GLOBALE su `state.agents` (dashboard).
+// Con `storyId` (montato da StoryPage.jsx dentro una storia) va scope-coerente:
+// fetcha GET /stories/{id}/agent-tokens e rende SOLO gli agent che hanno
+// lavorato su quella storia, con contatori e token-box calcolati sull'insieme
+// per-storia (story_tokens), non sul cumulativo globale. Nessuna regressione
+// sulla dashboard globale (AC7).
+export default function Agents({ state, reload, storyId }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [editing, setEditing] = useState(null);
 
+  const [storyData, setStoryData] = useState(null);
+  const [storyError, setStoryError] = useState(null);
+  const [storyLoaded, setStoryLoaded] = useState(false);
+
+  const loadStoryTokens = () => {
+    if (!storyId) return;
+    setStoryError(null);
+    setStoryLoaded(false);
+    api.stories
+      .agentTokens(storyId)
+      .then((data) => {
+        setStoryData(data);
+        setStoryLoaded(true);
+      })
+      .catch((e) => {
+        setStoryError(e.message);
+        setStoryLoaded(true);
+      });
+  };
+
+  useEffect(() => {
+    loadStoryTokens();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyId]);
+
+  const fmt = (n) => n.toLocaleString("en-US");
+
+  if (storyId) {
+    if (storyError) {
+      return (
+        <div className="empty-state">
+          Errore nel caricamento dei token della storia: {storyError}
+        </div>
+      );
+    }
+    if (!storyLoaded) {
+      return <div className="empty-state">Caricamento…</div>;
+    }
+    const storyAgents = storyData?.agents || [];
+    const totalTokens = storyData?.total_tokens || 0;
+    return (
+      <StoryScopedAgents
+        agents={storyAgents}
+        totalTokens={totalTokens}
+        fmt={fmt}
+      />
+    );
+  }
+
+  // ---- Comportamento globale invariato (dashboard, nessuno storyId) ----
   const agents = state.agents;
   const total = agents.reduce((s, a) => s + a.tokens, 0);
   const maxT = Math.max(...agents.map((a) => a.tokens), 1);
   const activeCount = agents.filter((a) => a.status === "active").length;
-  const fmt = (n) => n.toLocaleString("en-US");
 
   const add = async () => {
     if (!name.trim()) return;
@@ -166,6 +223,80 @@ export default function Agents({ state, reload }) {
               <Plus size={18} /> New agent
             </button>
           ))}
+      </div>
+    </div>
+  );
+}
+
+// View per-storia (story s36b99979): sola lettura (nessun add/edit/delete —
+// il ciclo di vita degli agent resta globale, gestito dalla dashboard). Rende
+// solo gli agent che hanno almeno un task su questa storia, con `story_tokens`
+// al posto del cumulativo globale (riusa token-box/bar-fill/stat-card).
+function StoryScopedAgents({ agents, totalTokens, fmt }) {
+  const activeCount = agents.filter((a) => a.status === "active").length;
+  const maxT = Math.max(...agents.map((a) => a.story_tokens), 1);
+
+  if (agents.length === 0) {
+    return (
+      <div className="agents">
+        <div className="stats">
+          <Stat icon={Activity} label="Active agents" value="0 / 0" accent="var(--c-prog)" />
+          <Stat icon={Zap} label="Total tokens" value={fmt(0)} accent="var(--epic)" />
+        </div>
+        <div className="empty-state">No agent has worked on this story yet.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="agents">
+      <div className="stats">
+        <Stat
+          icon={Activity}
+          label="Active agents"
+          value={`${activeCount} / ${agents.length}`}
+          accent="var(--c-prog)"
+        />
+        <Stat icon={Zap} label="Total tokens" value={fmt(totalTokens)} accent="var(--epic)" />
+      </div>
+      <div className="agent-grid">
+        {agents.map((a) => (
+          <div key={a.agent_id} className="agent-card">
+            <div className="agent-top">
+              <div className="agent-avatar">{a.name[0]}</div>
+              <div style={{ flex: 1 }}>
+                <div className="agent-name">{a.name}</div>
+                <div className="status-row">
+                  <span
+                    className="dot"
+                    style={{
+                      background: a.status === "active" ? "var(--c-done)" : "var(--muted)",
+                    }}
+                  />
+                  <span className="status-text">
+                    {a.status === "active" ? "Active" : "Idle"}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="task-box">
+              <span className="task-label">Currently doing</span>
+              <span className="task-val">{a.current_task}</span>
+            </div>
+            <div className="token-box">
+              <div className="token-head">
+                <span className="task-label">Tokens (this story)</span>
+                <span className="token-val">{fmt(a.story_tokens)}</span>
+              </div>
+              <div className="bar-bg">
+                <div
+                  className="bar-fill"
+                  style={{ width: `${(a.story_tokens / maxT) * 100}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
