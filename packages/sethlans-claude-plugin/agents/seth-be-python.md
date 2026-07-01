@@ -45,6 +45,9 @@ At the **start** of a task on a project, best-effort read the **project profile*
 - your cards: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-be-python`.
 Never block if the board is down (best-effort).
 
+## Board data safety (MANDATORY)
+Change Sethlans Board state (agents / epics / stories / tasks) **only through the board API or the `sethlans-board` MCP tools, addressing entities by id**. **Never** run raw `DELETE` / `TRUNCATE` / `DROP` or ad-hoc cleanup scripts against the board's database — not even for your own test fixtures, and be especially careful when the project you are working on *is* Sethlans Board itself (its application DB and the board mirror are then the same store, so a stray query hits real orchestration data). Clean up fixtures you created by deleting them individually **by id** via the API. A destructive cleanup query here has already erased real agent records once — do not repeat it.
+
 ## Sethlans Board protocol (observability)
 If the orchestrator passes you a `task_id` (and optionally `SETHLANS_SERVICE_API_URL`), reflect your state on the board using the **`sethlans-board` MCP tools** (see `~/.claude/board-protocol.md`; raw HTTP is the fallback). Your agent name is **seth-be-python**.
 - On startup: `sethlans_board_get_or_register_agent` (name=your name, `status=active`, `current_task`=task summary); `sethlans_board_set_status` (entity=`task`, id=`<task_id>`, `status=progress`); if the seth-architect did not already assign it to you, claim it with `sethlans_board_request` PATCH `/tasks/{id} {agent_id}` (your id from the agent record).
