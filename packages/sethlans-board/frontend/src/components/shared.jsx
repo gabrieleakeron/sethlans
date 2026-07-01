@@ -54,6 +54,47 @@ export function EditBox({ item, onSave, onCancel }) {
   );
 }
 
+// ---- Knowledge roles (ROLE_KNOWLEDGE, backend/models.py) ----
+// Centralizzato qui (storia s5cadd1fc, task tcf9f64d6): le chiavi devono
+// combaciare ESATTAMENTE con l'enum backend, altrimenti label/colore cadono
+// nel fallback (bug corretto — prima KnowledgePanel.jsx usava chiavi come
+// "architect"/"tester" che non esistono nell'enum reale "seth-architect"/
+// "seth-tester"). Riusata sia da CardsPanel.jsx sia da KnowledgePanel.jsx.
+export const ROLE_LABELS = {
+  general: "General",
+  po: "Product Owner",
+  ux: "UX Designer",
+  "seth-architect": "Architect",
+  "seth-tester": "Tester",
+  "seth-frontend": "Frontend",
+  "seth-be-python": "BE Python",
+  "seth-be-java": "BE Java",
+  "seth-fullstack": "Fullstack",
+  "seth-reviewer": "Reviewer",
+  "seth-devops": "DevOps",
+};
+export const ROLE_COLOR = {
+  general: "#6b7280",
+  po: "#8b6fd6",
+  ux: "#d67fb0",
+  "seth-architect": "#4a90d9",
+  "seth-tester": "#3fae5a",
+  "seth-frontend": "#e0a640",
+  "seth-be-python": "#3776ab",
+  "seth-be-java": "#b07219",
+  "seth-fullstack": "#5aa9a3",
+  "seth-reviewer": "#c2555c",
+  "seth-devops": "#6f6fce",
+};
+export const KIND_LABELS = { profile: "Profile", kb: "KB", learnings: "Learnings", standards: "Standards" };
+
+export function roleLabel(role) {
+  return ROLE_LABELS[role] || role;
+}
+export function roleColor(role) {
+  return ROLE_COLOR[role] || "var(--muted)";
+}
+
 // ---- Story phases (phase) ----
 export const PHASE_LABELS = {
   analysis: "Analysis",
@@ -107,6 +148,33 @@ function inlineMd(s) {
       '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
     );
 }
+// Riga "candidata" tabella GFM: contiene almeno un pipe non in una posizione
+// banale. Il match vero e proprio è demandato al controllo della riga
+// separatore successiva (vedi isTableSeparator), per evitare falsi positivi
+// su testo che contiene occasionalmente un "|".
+function isTableSeparator(line) {
+  const t = line.trim();
+  if (!/^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?$/.test(t)) return false;
+  return t.includes("-");
+}
+// Split di una riga tabella (già passata da esc()) nelle sue celle, gestendo
+// i pipe di apertura/chiusura opzionali. Non gestisce pipe escapati (`\|`):
+// il formato GFM supportato qui è quello semplice usato nei documenti Sethlans.
+function splitTableRow(line) {
+  let t = line.trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|").map((c) => c.trim());
+}
+function alignFromSeparatorCell(cell) {
+  const t = cell.trim();
+  const left = t.startsWith(":");
+  const right = t.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  if (left) return "left";
+  return null;
+}
 function renderMarkdown(md) {
   const lines = esc(md).split(/\r?\n/);
   let html = "";
@@ -119,7 +187,8 @@ function renderMarkdown(md) {
       inList = false;
     }
   };
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (/^```/.test(line)) {
       if (inCode) {
         html += "<pre><code>" + code + "</code></pre>";
@@ -133,6 +202,41 @@ function renderMarkdown(md) {
     }
     if (inCode) {
       code += line + "\n";
+      continue;
+    }
+    // Tabella GFM: riga corrente con "|" + riga successiva = separatore valido.
+    if (
+      line.includes("|") &&
+      i + 1 < lines.length &&
+      isTableSeparator(lines[i + 1])
+    ) {
+      closeList();
+      const headerCells = splitTableRow(line);
+      const aligns = splitTableRow(lines[i + 1]).map(alignFromSeparatorCell);
+      const ncols = headerCells.length;
+      const alignAttr = (idx) => {
+        const a = aligns[idx];
+        return a ? ` style="text-align:${a}"` : "";
+      };
+      html += "<table><thead><tr>";
+      for (let c = 0; c < ncols; c++) {
+        html += `<th${alignAttr(c)}>` + inlineMd(headerCells[c] || "") + "</th>";
+      }
+      html += "</tr></thead>";
+      let j = i + 2;
+      let bodyRows = "";
+      while (j < lines.length && lines[j].includes("|") && lines[j].trim() !== "") {
+        const cells = splitTableRow(lines[j]);
+        bodyRows += "<tr>";
+        for (let c = 0; c < ncols; c++) {
+          bodyRows += `<td${alignAttr(c)}>` + inlineMd(cells[c] || "") + "</td>";
+        }
+        bodyRows += "</tr>";
+        j++;
+      }
+      if (bodyRows) html += "<tbody>" + bodyRows + "</tbody>";
+      html += "</table>";
+      i = j - 1;
       continue;
     }
     const h = line.match(/^(#{1,4})\s+(.*)$/);

@@ -170,6 +170,56 @@ single story/task like `Mockup` is.
 - **Consumers**: `seth-ux-designer` and `seth-frontend` query `GET /design-systems?project_id=` **best-effort, never blocking** before producing mockups / implementing UI — if present, it is their primary reference for tokens/components instead of re-deriving palette/patterns ad hoc from other stories; if absent or unreachable, they fall back to discovery from `CLAUDE.md`/existing screens as before.
 - **Do not** reuse `Mockup.owner_type=story|task` for the design system, and do not add an `owner_type=project` to `Mockup`: granularity and lifecycle differ (one project-wide artifact vs. N per-story/task mockup instances) — keep them as separate entities.
 
+### Export/Import project data (story `s09f34f1a`) — portability across Board instances
+A project's "knowledge" (profile + config + all its `Knowledge` cards + its `DesignSystem`) can be
+exported to a versioned JSON envelope and re-imported into another project (same or a different
+Board instance): backup, cloning an onboarded project, or moving knowledge between instances.
+**Out of scope**: epic/story/task/mockup/agent/token — different operational lifecycle. No new
+table: three endpoints layered over `Project`/`Knowledge`/`DesignSystem`. Constant
+`SETHLANS_EXPORT_VERSION = 1` in `models.py`; `MODE_IMPORT = {merge, replace}`.
+
+Envelope shape (no internal ids, no `ext_*`/`sync_state`/timestamps, no secrets):
+```json
+{
+  "sethlans_export_version": 1,
+  "exported_at": "<ISO8601>",
+  "project": { "name", "type", "jira_key", "md", "config" },
+  "knowledge": [ { "role", "kind", "source", "title", "md" } ],
+  "design_system": { "title", "md", "tokens", "components", "source" } | null
+}
+```
+- **`GET /projects/{id}/export`** — 200 with the envelope above (ALL knowledge cards of the
+  project, every role/kind; `design_system: null` if the project has none). 404 if the project
+  doesn't exist.
+- **`POST /projects/import/preview`** — dry-run, body `{ data, target_project_id, mode }`
+  (`target_project_id: null` = new project; `mode ∈ {merge, replace}`, default `merge`). Never
+  writes. Malformed envelope (bad/missing `sethlans_export_version`, missing `project`/`knowledge`)
+  → 200 with `valid: false` + `errors`. Per-card invalid `role`/`kind`/`source` → card excluded
+  from the plan + reported in `warnings`, envelope stays `valid: true`. `target_project_id` set but
+  missing → 404; `mode` outside `{merge, replace}` → 422. Response (`ImportPreviewOut`): `valid,
+  errors, warnings, counts {knowledge_total, knowledge_valid, roles, standards,
+  design_system_included}, plan {target, mode, profile_action, design_system_action,
+  knowledge_create, knowledge_update, knowledge_delete}`.
+- **`POST /projects/import`** — same body, applies in **one transaction** (rollback on any
+  unexpected error — never a partial write). `target_project_id: null` → creates a new `Project`
+  (`new_id("p")`) + all valid knowledge (`new_id("k")`) + design system (`new_id("ds")`) if
+  present. Existing target + `mode=merge` → knowledge matched by `(role, kind, title)`
+  (update-in-place or create), profile (`md`/`config`) written only if the target's is empty
+  (`profile_action: set`, otherwise `kept`), design system upserted 1:1. Existing target +
+  `mode=replace` → deletes ALL of the target's `Knowledge` + its `DesignSystem`, then reimports
+  from scratch (`profile_action: overwritten`). Invalid enum on a card → skip + warning (never a
+  500); invalid `project.type`/`design_system.source` → fallback to the default + warning (field
+  only, the row itself is not dropped). 404 if `target_project_id` doesn't exist; 422 for a bad
+  `mode` or an unusable envelope. Response (`ImportResultOut`): `target_project_id, mode,
+  profile_action, design_system_action, knowledge_created, knowledge_updated, knowledge_skipped,
+  warnings`.
+- **FE**: `Export`/`Import` live in `App.jsx`'s main header, next to the Refresh button — **not**
+  on the Knowledge page. Export = one click → `GET .../export` → JSON file download
+  (`sethlans-export-<slug>-<date>.json`). Import = a 4-step wizard overlay
+  (`components/ImportWizard.jsx`, reusing `MockupViewer.jsx`'s overlay pattern): File → Target
+  (new/existing) → Mode (merge/replace) → Preview & confirm (calls `.../import/preview`, then
+  `.../import` on confirm; `replace` requires an explicit checkbox before the button enables).
+
 ## Story phases (`phase`)
 They model the PO→UX→seth-architect→dev flow without touching the raw `status`:
 - `analysis` — Product Owner: analysis in progress/to be done.

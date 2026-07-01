@@ -1,0 +1,37 @@
+name: sethlans-qa
+
+# Stack QA isolato — scratch, per validare storie 1+2+3 (export/import BE+FE,
+# fix tabelle MD, vista Cards) SENZA toccare la board live su :9955/:5173.
+# Backend con codice corrente (working tree, incl. modifiche non committate),
+# DB Postgres dedicato sethlans_dev_service (NON il DB sethlans_board live).
+# Frontend buildato staticamente (Vite build + nginx) puntato al backend scratch.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: sethlans-qa-server
+    environment:
+      - SETHLANS_SERVICE_DB_URL=postgresql+psycopg2://postgres:password@host.docker.internal:5432/sethlans_dev_service
+      - SETHLANS_SERVICE_CORS_ORIGINS=http://localhost:8091
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8090:9955"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8090
+    container_name: sethlans-qa-board
+    ports:
+      - "8091:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

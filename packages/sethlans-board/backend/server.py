@@ -44,6 +44,8 @@ from models import (
     MOCKUP_TYPE,
     PHASE_STORY,
     ROLE_KNOWLEDGE,
+    MODE_IMPORT,
+    SETHLANS_EXPORT_VERSION,
     SOURCE_KNOWLEDGE,
     STATUS_AGENT,
     STATUS_WORK,
@@ -236,6 +238,37 @@ class DesignSystemPatch(BaseModel):
     ext_url: Optional[str] = None
     last_scan_at: Optional[datetime] = None
     last_sync_at: Optional[datetime] = None
+
+
+# ---------- Export/Import dati progetto (story s09f34f1a) ----------
+# `data` è l'envelope grezzo (dict libero, non un modello Pydantic annidato): la
+# validazione di forma/enum è applicativa in `_validate_export_envelope`, non a
+# livello di schema, perché un JSON malformato deve produrre `valid: false` (o
+# warning per singola card) e non un 422 generico di FastAPI.
+
+class ImportRequest(BaseModel):
+    data: dict
+    target_project_id: Optional[str] = None
+    mode: str = "merge"
+
+
+class ImportPreviewOut(BaseModel):
+    valid: bool
+    errors: list[str] = []
+    warnings: list[str] = []
+    counts: dict = {}
+    plan: dict = {}
+
+
+class ImportResultOut(BaseModel):
+    target_project_id: str
+    mode: str
+    profile_action: str
+    design_system_action: str
+    knowledge_created: int
+    knowledge_updated: int
+    knowledge_skipped: int
+    warnings: list[str] = []
 
 
 # ----------------------------- App -----------------------------
@@ -455,6 +488,299 @@ def update_project(project_id: str, body: ProjectPatch, db: Session = Depends(ge
 def delete_project(project_id: str, db: Session = Depends(get_db)):
     db.delete(fetch_or_404(db, Project, project_id)); db.commit()
     return {"deleted": project_id}
+
+
+# ---------- EXPORT / IMPORT dati progetto (story s09f34f1a) ----------
+# Portabilità del "sapere" di un progetto (profilo + knowledge + design-system)
+# tra istanze della Board: nessuna nuova tabella, solo un envelope JSON
+# versionato e due endpoint di scrittura (preview dry-run + apply transazionale).
+# Fuori scope: epic/story/task/mockup/agent — ciclo di vita operativo distinto.
+
+def _knowledge_export_dict(k: Knowledge) -> dict:
+    """Card knowledge senza id/project_id/md_updated_at (non portabili tra istanze)."""
+    return {"role": k.role, "kind": k.kind, "source": k.source, "title": k.title, "md": k.md or ""}
+
+
+def _design_system_export_dict(ds: DesignSystem) -> dict:
+    """Design system senza id/ext_*/sync_state/timestamp (specifici dell'istanza sorgente)."""
+    return {
+        "title": ds.title, "md": ds.md, "tokens": ds.tokens,
+        "components": ds.components, "source": ds.source,
+    }
+
+
+@app.get("/projects/{project_id}/export")
+def export_project(project_id: str, db: Session = Depends(get_db)):
+    """Esporta il "sapere" del progetto (profilo + config + knowledge + design-system)
+    in un envelope JSON versionato, senza id interni né segreti. Portabile su
+    un'altra istanza della Board via POST /projects/import."""
+    project = fetch_or_404(db, Project, project_id)
+    cards = db.query(Knowledge).filter(Knowledge.project_id == project_id).all()
+    ds = db.query(DesignSystem).filter(DesignSystem.project_id == project_id).one_or_none()
+    return {
+        "sethlans_export_version": SETHLANS_EXPORT_VERSION,
+        "exported_at": _now().isoformat(),
+        "project": {
+            "name": project.name, "type": project.type,
+            "jira_key": project.jira_key or "", "md": project.md or "",
+            "config": project.config or {},
+        },
+        "knowledge": [_knowledge_export_dict(k) for k in cards],
+        "design_system": _design_system_export_dict(ds) if ds else None,
+    }
+
+
+def _validate_envelope_shape(data: dict) -> list[str]:
+    """Validazione strutturale dell'envelope: versione gestita + campi minimi.
+    Ritorna la lista di errori bloccanti (vuota = envelope utilizzabile)."""
+    errors: list[str] = []
+    if not isinstance(data, dict):
+        return ["il file non contiene un oggetto JSON valido"]
+    version = data.get("sethlans_export_version")
+    if version != SETHLANS_EXPORT_VERSION:
+        errors.append(
+            f"sethlans_export_version {version!r} non gestita (attesa {SETHLANS_EXPORT_VERSION})"
+        )
+    project = data.get("project")
+    if not isinstance(project, dict) or not project.get("name"):
+        errors.append("campo 'project' assente o senza 'name'")
+    knowledge = data.get("knowledge", [])
+    if not isinstance(knowledge, list):
+        errors.append("campo 'knowledge' deve essere una lista")
+    return errors
+
+
+def _split_valid_knowledge(data: dict) -> tuple[list[dict], list[str]]:
+    """Divide le card knowledge dell'envelope in valide/scartate, con warning
+    per ciascuna card fuori enum (role/kind/source) — mai un'eccezione qui:
+    un valore fuori range scarta la SINGOLA card, non l'intero import."""
+    valid: list[dict] = []
+    warnings: list[str] = []
+    for i, card in enumerate(data.get("knowledge") or []):
+        if not isinstance(card, dict) or not card.get("title"):
+            warnings.append(f"knowledge[{i}]: card senza 'title' — scartata")
+            continue
+        role, kind, source = card.get("role", "general"), card.get("kind", "kb"), card.get("source", "manual")
+        bad = [
+            (field, value) for field, value, allowed in (
+                ("role", role, ROLE_KNOWLEDGE), ("kind", kind, KIND_KNOWLEDGE), ("source", source, SOURCE_KNOWLEDGE),
+            ) if value not in allowed
+        ]
+        if bad:
+            detail = ", ".join(f"{f} {v!r}" for f, v in bad)
+            warnings.append(f"knowledge[{i}] ({card.get('title')!r}): {detail} non riconosciuto — scartata")
+            continue
+        valid.append(card)
+    return valid, warnings
+
+
+def _plan_for(db: Session, data: dict, target: Project | None, mode: str) -> dict:
+    """Calcola il piano (create/update/delete + azioni profilo/design-system)
+    condiviso da preview e apply, così i due endpoint non possono divergere."""
+    valid_cards, _ = _split_valid_knowledge(data)
+    has_ds = bool(data.get("design_system"))
+
+    if target is None:
+        return {
+            "target": "new", "mode": mode, "profile_action": "set",
+            "design_system_action": "create" if has_ds else "none",
+            "knowledge_create": len(valid_cards), "knowledge_update": 0, "knowledge_delete": 0,
+        }
+
+    existing_ds = db.query(DesignSystem).filter(DesignSystem.project_id == target.id).one_or_none()
+    if mode == "replace":
+        existing_count = db.query(Knowledge).filter(Knowledge.project_id == target.id).count()
+        return {
+            "target": "existing", "mode": mode, "profile_action": "overwritten",
+            "design_system_action": ("replace" if has_ds else "none") if existing_ds else ("create" if has_ds else "none"),
+            "knowledge_create": len(valid_cards), "knowledge_update": 0, "knowledge_delete": existing_count,
+        }
+
+    # merge
+    existing_cards = db.query(Knowledge).filter(Knowledge.project_id == target.id).all()
+    existing_keys = {(k.role, k.kind, k.title) for k in existing_cards}
+    to_update = sum(1 for c in valid_cards if (c.get("role", "general"), c.get("kind", "kb"), c["title"]) in existing_keys)
+    to_create = len(valid_cards) - to_update
+    profile_empty = not (target.md or "").strip() and not (target.config or {})
+    return {
+        "target": "existing", "mode": mode,
+        "profile_action": "set" if profile_empty else "kept",
+        "design_system_action": ("update" if existing_ds else "create") if has_ds else "none",
+        "knowledge_create": to_create, "knowledge_update": to_update, "knowledge_delete": 0,
+    }
+
+
+@app.post("/projects/import/preview", response_model=ImportPreviewOut)
+def import_preview(body: ImportRequest, db: Session = Depends(get_db)):
+    """Dry-run: non scrive nulla. Valida l'envelope e calcola il piano che
+    /projects/import applicherebbe, così il wizard FE mostra un'anteprima
+    fedele prima della conferma (specie per `replace`, distruttivo)."""
+    if body.mode not in MODE_IMPORT:
+        raise HTTPException(422, f"mode non valido: deve essere uno tra {sorted(MODE_IMPORT)}")
+
+    target = None
+    if body.target_project_id is not None:
+        target = fetch_or_404(db, Project, body.target_project_id)
+
+    errors = _validate_envelope_shape(body.data)
+    if errors:
+        return ImportPreviewOut(valid=False, errors=errors, warnings=[], counts={}, plan={})
+
+    valid_cards, warnings = _split_valid_knowledge(body.data)
+    roles = {c.get("role", "general") for c in valid_cards}
+    standards = sum(1 for c in valid_cards if c.get("kind") == "standards")
+    counts = {
+        "knowledge_total": len(body.data.get("knowledge") or []),
+        "knowledge_valid": len(valid_cards),
+        "roles": len(roles),
+        "standards": standards,
+        "design_system_included": bool(body.data.get("design_system")),
+    }
+    plan = _plan_for(db, body.data, target, body.mode)
+    return ImportPreviewOut(valid=True, errors=[], warnings=warnings, counts=counts, plan=plan)
+
+
+@app.post("/projects/import", response_model=ImportResultOut)
+def import_project(body: ImportRequest, db: Session = Depends(get_db)):
+    """Applica l'import in UNA transazione (rollback su qualunque errore
+    inatteso): niente stato parziale persistito. Semantica per target/mode
+    descritta nel contratto (story s09f34f1a, sezione API Contract)."""
+    if body.mode not in MODE_IMPORT:
+        raise HTTPException(422, f"mode non valido: deve essere uno tra {sorted(MODE_IMPORT)}")
+
+    target = None
+    if body.target_project_id is not None:
+        target = fetch_or_404(db, Project, body.target_project_id)
+
+    errors = _validate_envelope_shape(body.data)
+    if errors:
+        raise HTTPException(422, "; ".join(errors))
+
+    valid_cards, warnings = _split_valid_knowledge(body.data)
+    proj_in = body.data.get("project") or {}
+    proj_type = proj_in.get("type", "internal")
+    if proj_type not in TYPE_PROJECT:
+        warnings.append(f"project.type {proj_type!r} non riconosciuto — uso 'internal'")
+        proj_type = "internal"
+    ds_in = body.data.get("design_system")
+    if ds_in and ds_in.get("source", "code_scan") not in DESIGN_SOURCE:
+        warnings.append(f"design_system.source {ds_in.get('source')!r} non riconosciuto — uso 'code_scan'")
+        ds_in = {**ds_in, "source": "code_scan"}
+
+    try:
+        now = _now()
+        mode = body.mode
+        created = updated = skipped = 0
+        skipped = len(body.data.get("knowledge") or []) - len(valid_cards)
+
+        # Snapshot pre-transazione: nel ramo replace la delete sotto rimuove la riga
+        # del DesignSystem del target, quindi va rilevata PRIMA, altrimenti il ramo
+        # "replace" più sotto (~riga 749) diventa irraggiungibile e la risposta apply
+        # diverge sempre dalla preview (che usa lo stesso stato pre-delete via _plan_for).
+        had_existing_ds = (
+            target is not None
+            and db.query(DesignSystem).filter(DesignSystem.project_id == target.id).first() is not None
+        )
+
+        if target is None:
+            # Target nuovo: crea progetto + tutte le card valide + design-system.
+            target = Project(
+                id=new_id("p"), name=proj_in.get("name", "Imported project"), type=proj_type,
+                jira_key=proj_in.get("jira_key", ""), md=proj_in.get("md", ""),
+                config=proj_in.get("config") or {}, md_updated_at=now if proj_in.get("md") else None,
+            )
+            db.add(target)
+            profile_action = "set"
+            mode = "merge"  # irrilevante per target nuovo, normalizzato per la risposta
+        elif mode == "replace":
+            db.query(Knowledge).filter(Knowledge.project_id == target.id).delete()
+            db.query(DesignSystem).filter(DesignSystem.project_id == target.id).delete()
+            target.name = proj_in.get("name", target.name)
+            target.type = proj_type
+            target.jira_key = proj_in.get("jira_key", "")
+            target.md = proj_in.get("md", "")
+            target.config = proj_in.get("config") or {}
+            target.md_updated_at = now
+            profile_action = "overwritten"
+        else:
+            profile_empty = not (target.md or "").strip() and not (target.config or {})
+            if profile_empty:
+                target.md = proj_in.get("md", "")
+                target.config = proj_in.get("config") or {}
+                target.md_updated_at = now
+                profile_action = "set"
+            else:
+                profile_action = "kept"
+
+        db.flush()  # garantisce target.id per i nuovi record senza commit anticipato
+
+        if mode == "merge" and body.target_project_id is not None:
+            existing_by_key = {
+                (k.role, k.kind, k.title): k
+                for k in db.query(Knowledge).filter(Knowledge.project_id == target.id).all()
+            }
+            for card in valid_cards:
+                role, kind, source = card.get("role", "general"), card.get("kind", "kb"), card.get("source", "manual")
+                key = (role, kind, card["title"])
+                existing = existing_by_key.get(key)
+                if existing:
+                    existing.source = source
+                    existing.md = card.get("md", "")
+                    existing.md_updated_at = now
+                    updated += 1
+                else:
+                    db.add(Knowledge(
+                        id=new_id("k"), project_id=target.id, role=role, kind=kind,
+                        title=card["title"], source=source, md=card.get("md", ""),
+                        md_updated_at=now if card.get("md") else None,
+                    ))
+                    created += 1
+        else:
+            # target nuovo oppure replace: tutte le card valide sono creazioni.
+            for card in valid_cards:
+                db.add(Knowledge(
+                    id=new_id("k"), project_id=target.id, role=card.get("role", "general"),
+                    kind=card.get("kind", "kb"), title=card["title"], source=card.get("source", "manual"),
+                    md=card.get("md", ""), md_updated_at=now if card.get("md") else None,
+                ))
+                created += 1
+
+        design_system_action = "none"
+        if ds_in:
+            # Nel ramo replace la riga precedente è già stata cancellata sopra, quindi
+            # qui esiste sempre come nuovo insert: l'azione riportata deve riflettere
+            # se un DS preesisteva PRIMA della delete (had_existing_ds), non lo stato
+            # attuale della tabella — altrimenti diverge dal piano di _plan_for.
+            existing_ds = db.query(DesignSystem).filter(DesignSystem.project_id == target.id).one_or_none()
+            if existing_ds:
+                existing_ds.title = ds_in.get("title", existing_ds.title)
+                existing_ds.md = ds_in.get("md")
+                existing_ds.tokens = ds_in.get("tokens")
+                existing_ds.components = ds_in.get("components")
+                existing_ds.source = ds_in.get("source", "code_scan")
+                existing_ds.updated_at = now
+                design_system_action = "update"
+            else:
+                db.add(DesignSystem(
+                    id=new_id("ds"), project_id=target.id, title=ds_in.get("title", "Design System"),
+                    md=ds_in.get("md"), tokens=ds_in.get("tokens"), components=ds_in.get("components"),
+                    source=ds_in.get("source", "code_scan"), created_at=now, updated_at=now,
+                ))
+                design_system_action = "replace" if mode == "replace" and had_existing_ds else "create"
+
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(422, f"import fallito, nessuna modifica applicata: {exc}") from exc
+
+    return ImportResultOut(
+        target_project_id=target.id, mode=mode, profile_action=profile_action,
+        design_system_action=design_system_action, knowledge_created=created,
+        knowledge_updated=updated, knowledge_skipped=skipped, warnings=warnings,
+    )
 
 
 # ---------- EPICS ----------

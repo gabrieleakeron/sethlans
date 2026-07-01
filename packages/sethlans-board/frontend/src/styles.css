@@ -50,6 +50,29 @@ code {
   font-size: 0.92em;
 }
 
+/* Tabelle GFM nel renderer Markdown condiviso (shared.jsx renderMarkdown).
+   display:block + overflow-x:auto sulla tabella stessa evita che una tabella
+   larga allarghi/scrolli la pagina intera su viewport stretto. */
+.md-prose table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.95em;
+  max-width: 100%;
+}
+.md-prose th,
+.md-prose td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.md-prose th {
+  background: var(--panel2);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .app { min-height: 100%; }
 
 /* ---------- Header ---------- */
@@ -528,6 +551,19 @@ textarea.input { min-height: 90px; font-family: monospace; resize: vertical; }
   color: var(--muted); font-size: 13px; font-weight: 600;
 }
 
+/* ---------- Cards view (story s5cadd1fc) ----------
+   Tile per role, riusa 1:1 .agent-grid/.agent-card/.agent-top/.agent-avatar/
+   .task-box/.badge (Agents.jsx). Solo due classi nuove: la riga di badge
+   nella tile e il riquadro Standards evidenziato nel dettaglio (overlay
+   condiviso .mockup-overlay-backdrop/.preview-overlay, vedi MockupViewer.jsx). */
+.agent-card[role="button"] { cursor: pointer; }
+.agent-card[role="button"]:hover { border-color: var(--story); box-shadow: 0 0 0 1px var(--story); }
+.badge-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.standards-box {
+  border: 1px solid var(--c-done); border-radius: 10px; padding: 14px;
+  background: rgba(63, 185, 80, 0.06);
+}
+
 /* ---------- Design System page (story s2340fc3b) ----------
    Riusa 1:1 i pattern esistenti (.badge, .mockup-grid/.mockup-card,
    .open-ext-btn, .empty-state, .btn-primary/.btn-ghost, .section-title);
@@ -583,3 +619,71 @@ textarea.input { min-height: 90px; font-family: monospace; resize: vertical; }
 .dim-box { background: var(--story); border-radius: 3px; }
 .dim-box-label { font-size: 10.5px; color: var(--muted); font-family: monospace; }
 .ds-component-preview { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+
+/* ---------- Export / Import (story s09f34f1a) ----------
+   Bottoni nell'header (accanto a .reset-btn) + wizard 4-step nell'overlay
+   condiviso .mockup-overlay-backdrop/.preview-overlay (vedi MockupViewer.jsx).
+   Riusa .add-form/.input, .btn-primary/.btn-ghost, .chip, .badge, .empty-state. */
+.header-icon-btn {
+  padding: 9px; border-radius: 9px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  display: grid; place-items: center;
+}
+.header-icon-btn:hover { color: var(--text); border-color: var(--c-prog); }
+
+.wizard-steps { display: flex; gap: 6px; margin-bottom: 16px; }
+.wizard-step {
+  flex: 1; text-align: center; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted);
+  padding-bottom: 8px; border-bottom: 2px solid var(--border);
+}
+.wizard-step.done { color: var(--c-done); border-bottom-color: var(--c-done); }
+.wizard-step.active { color: var(--text); border-bottom-color: var(--c-prog); }
+
+.dropzone {
+  border: 1px dashed var(--border); border-radius: 9px; padding: 28px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: var(--muted); font-size: 12.5px; text-align: center;
+}
+.dropzone.drag-over { border-color: var(--epic); background: rgba(47, 129, 247, 0.08); }
+.dropzone.has-error { border-color: var(--c-err); color: var(--c-err); }
+.dropzone.has-file { border-style: solid; border-color: var(--c-done); }
+.dropzone .fname { color: var(--text); font-weight: 600; font-size: 13px; }
+
+.radio-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--card);
+  cursor: pointer;
+}
+.radio-row.selected { border-color: var(--epic); box-shadow: 0 0 0 1px var(--epic); }
+.radio-row.selected.danger { border-color: var(--c-err); box-shadow: 0 0 0 1px var(--c-err); }
+.radio-row .rt { font-weight: 600; font-size: 13px; }
+.radio-row .rd { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+.summary-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;
+  margin-bottom: 12px;
+}
+.summary-tile {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.summary-val { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; }
+.summary-label { font-size: 11px; color: var(--muted); }
+
+.warn-box {
+  background: rgba(248, 81, 73, 0.10); border: 1px solid var(--c-err); border-radius: 10px;
+  padding: 12px 14px; font-size: 12.5px; display: flex; gap: 10px; align-items: flex-start;
+  margin-bottom: 12px;
+}
+.confirm-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; margin: 10px 0; }
+.success-box {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px;
+  text-align: center;
+}
+.success-icon {
+  width: 44px; height: 44px; border-radius: 50%; background: rgba(63, 185, 80, 0.16);
+  color: var(--c-done); display: grid; place-items: center;
+}
+.btn-primary.danger { background: var(--c-err); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }

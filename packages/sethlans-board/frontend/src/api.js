@@ -96,6 +96,29 @@ export const mockups = {
   remove: (id) => request("DELETE", `/mockups/${id}`),
 };
 
+// Export/Import dati progetto (story s09f34f1a): portabilità del "sapere" di
+// un progetto (profilo + knowledge + design-system) tra istanze della Board.
+// `exportProject` non passa dal wrapper `request` generico: il chiamante deve
+// poter innescare un download del blob, non solo leggere JSON.
+export const projectData = {
+  exportProject: async (projectId) => {
+    const res = await fetch(`${base}/projects/${projectId}/export`, { credentials: "include" });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = await res.json();
+        detail = j.detail || detail;
+      } catch {}
+      throw new Error(`${res.status} ${detail}`);
+    }
+    return res.json();
+  },
+  importPreview: (data, targetProjectId, mode) =>
+    request("POST", "/projects/import/preview", { data, target_project_id: targetProjectId, mode }),
+  importApply: (data, targetProjectId, mode) =>
+    request("POST", "/projects/import", { data, target_project_id: targetProjectId, mode }),
+};
+
 // Mockup comments: target polimorfico (story|task) + mockup_index.
 // Il composer è sempre abilitato (eccezione a VITE_READONLY, vedi config.js).
 export const mockupComments = {

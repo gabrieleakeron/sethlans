@@ -94,6 +94,13 @@ KIND_KNOWLEDGE = {"profile", "kb", "learnings", "standards"}
 # source: da dove proviene il contenuto.
 SOURCE_KNOWLEDGE = {"claude_md", "confluence", "jira", "code", "manual"}
 
+# Versione dell'envelope di export/import dati progetto (story s09f34f1a).
+# Incrementare SOLO se cambia la forma del JSON in modo incompatibile; l'import
+# valida questo valore per rifiutare export di versioni future non gestite.
+SETHLANS_EXPORT_VERSION = 1
+# Modalità di import su un progetto target esistente (irrilevante per target nuovo).
+MODE_IMPORT = {"merge", "replace"}
+
 
 def new_id(prefix: str) -> str:
     return f"{prefix}{uuid.uuid4().hex[:8]}"
