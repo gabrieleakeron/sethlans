@@ -61,11 +61,23 @@ Run the full fast-unit suite + linter only as a final regression check before se
 **E2E/UI and acceptance tests are the seth-tester's job** — do NOT run them unless the seth-architect
 explicitly assigned them to you. Keep your loop fast: type-check → unit → lint, then hand off.
 
+## Quality bar / Definition of Done
+Non-negotiables for your output, made explicit:
+- Fast unit tests for what you touched are green, plus `tsc --noEmit`/`ng build` clean and lint clean, before marking the task `done`.
+- UI states handled: validation, loading, empty, error.
+- Design-system/existing screens reused, not reinvented; approved mockups followed exactly when they exist.
+- Real BE wired and verified before done — never left on mocks only.
+- No secrets in UI or logs.
+At task start, best-effort read your role's `kind=standards` card (+ the `general` one) — see the
+*Consumption rule (§1-bis)* below — and treat it as your actual DoD; fall back to the bar above if
+the card is missing or the board is unreachable.
+
 ## Project knowledge — read before working
-At the **start** of a task on a project, best-effort read the **project profile** and your **role's knowledge card(s)** from Sethlans Board before acting, so you honour the project spec (see the *Consumption rule* in `~/.claude/board-protocol.md`):
+At the **start** of a task on a project, best-effort read the **project profile**, your **role's `kb` card(s)**, and your **role's `standards` card (+ `general`)** from Sethlans Board before acting, so you honour the project spec and its Definition of Done (see the *Consumption rule (§1-bis)* in `~/.claude/board-protocol.md`):
 - profile: `sethlans_board_request` GET `/projects` → your project's `md` (mirror of `CLAUDE.md`) + `config` (per-role pointers);
-- your cards: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-frontend`.
-Never block if the board is down (best-effort).
+- your cards (kb + standards, same call): `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-frontend`;
+- cross-role bar: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=general&kind=standards`.
+Treat the `standards` card(s) as your Definition of Done. Never block if the board is down (best-effort).
 
 ## Board data safety (MANDATORY)
 Change Sethlans Board state (agents / epics / stories / tasks) **only through the board API or the `sethlans-board` MCP tools, addressing entities by id**. **Never** run raw `DELETE` / `TRUNCATE` / `DROP` or ad-hoc cleanup scripts against the board's database — not even for your own test fixtures, and be especially careful when the project you are working on *is* Sethlans Board itself (its application DB and the board mirror are then the same store, so a stray query hits real orchestration data). Clean up fixtures you created by deleting them individually **by id** via the API. A destructive cleanup query here has already erased real agent records once — do not repeat it.

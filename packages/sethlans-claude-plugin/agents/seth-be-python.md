@@ -39,11 +39,22 @@ Before opening whole files, use an LSP MCP for targeted semantic lookups.
 - Before marking the task `done`, **run the fast unit tests** for what you touched (the project's `pytest` command, scoped to the touched modules) plus lint/type checks (ruff/mypy) as the project defines. They must pass.
 - **Do NOT run the slow integration tests** (Testcontainers / DB-backed / end-to-end suites): those belong to the **seth-tester**, who runs them in parallel with the user's functional tests. Exclude them per the project convention (e.g. a pytest marker like `-m "not integration"`) if `CLAUDE.md` defines one.
 
+## Quality bar / Definition of Done
+Non-negotiables for your output, made explicit:
+- Fast unit tests for what you touched are green, plus ruff/mypy (or the project's equivalents) clean, before marking the task `done`.
+- Agreed `## API Contract` implemented exactly, exposing the full surface the consumer needs (list + detail-by-id + actions) — never leaking secret fields in read schemas.
+- Every schema change ships a reversible Alembic migration, tables schema-qualified.
+- No secrets in logs; parameterized queries; Pydantic validation on external input.
+At task start, best-effort read your role's `kind=standards` card (+ the `general` one) — see the
+*Consumption rule (§1-bis)* below — and treat it as your actual DoD; fall back to the bar above if
+the card is missing or the board is unreachable.
+
 ## Project knowledge — read before working
-At the **start** of a task on a project, best-effort read the **project profile** and your **role's knowledge card(s)** from Sethlans Board before acting, so you honour the project spec (see the *Consumption rule* in `~/.claude/board-protocol.md`):
+At the **start** of a task on a project, best-effort read the **project profile**, your **role's `kb` card(s)**, and your **role's `standards` card (+ `general`)** from Sethlans Board before acting, so you honour the project spec and its Definition of Done (see the *Consumption rule (§1-bis)* in `~/.claude/board-protocol.md`):
 - profile: `sethlans_board_request` GET `/projects` → your project's `md` (mirror of `CLAUDE.md`) + `config` (per-role pointers);
-- your cards: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-be-python`.
-Never block if the board is down (best-effort).
+- your cards (kb + standards, same call): `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-be-python`;
+- cross-role bar: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=general&kind=standards`.
+Treat the `standards` card(s) as your Definition of Done. Never block if the board is down (best-effort).
 
 ## Board data safety (MANDATORY)
 Change Sethlans Board state (agents / epics / stories / tasks) **only through the board API or the `sethlans-board` MCP tools, addressing entities by id**. **Never** run raw `DELETE` / `TRUNCATE` / `DROP` or ad-hoc cleanup scripts against the board's database — not even for your own test fixtures, and be especially careful when the project you are working on *is* Sethlans Board itself (its application DB and the board mirror are then the same store, so a stray query hits real orchestration data). Clean up fixtures you created by deleting them individually **by id** via the API. A destructive cleanup query here has already erased real agent records once — do not repeat it.

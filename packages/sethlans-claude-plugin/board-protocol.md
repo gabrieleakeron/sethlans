@@ -17,6 +17,37 @@ Updating Sethlans Board is **observability**, not part of the real work.
 - If the board does not respond (connection refused, timeout, HTTP error), **DO NOT block** the task: proceed with the real work and report in the result that the board update failed.
 - Always wrap the calls in `try/catch` (PowerShell) and must not fail the turn over a network error toward the board.
 
+## Consumption rule (§1-bis) — what every agent reads at task start
+Every `seth-*` subagent cites this section under its own "Project knowledge — read before
+working" heading. It is the single definition of **what to read and in what order**, so it is
+not duplicated (and cannot drift) across the 10 agent files.
+
+At the **start** of a task on a project, best-effort read, in this order:
+1. **Project profile + config** — `sethlans_board_request` GET `/projects` (or `/projects/{id}`
+   if the id is already known) → the project's `md` (mirror of `CLAUDE.md`) and `config`
+   (per-role pointers: ticket/docs sources, design-system, test environments, …).
+2. **Your role's `kind=kb` card(s)** — `sethlans_board_request` GET
+   `/knowledge?project_id=<id>&role=<your-role>` → the project knowledge distilled for your role
+   (architecture map, PO sources, design system, test strategy, …). The endpoint already returns
+   **every** `kind` for that role in one call (no separate call needed to also get `standards`).
+3. **Your role's `kind=standards` card, plus the `general` one** — from the **same** response as
+   step 2 (filter client-side by `kind=standards`), and additionally
+   `GET /knowledge?project_id=<id>&role=general&kind=standards` for the cross-role bar. Titles
+   follow the fixed convention **`Definition of Done — <role>`** / **`Definition of Done —
+   general`** (see `/sethlans-standards`, `commands/sethlans-standards.md`, and the pre-training
+   trigger in `commands/sethlans-onboard.md` §3). **Treat the `standards` card as your Definition
+   of Done** for this task: it is the quality bar your own output must meet, distinct from the
+   `kb` card (project knowledge you consume, not a bar you meet). When both a role-specific and a
+   `general` card exist, both apply — the role card does not override the general one.
+4. **Degrade gracefully.** If the board does not respond, or a `standards`/`kb` card does not
+   exist yet for the role/project (e.g. pre-training never ran), do **not** block: proceed using
+   the generic non-negotiables in your own agent file's "Quality bar / Definition of Done"
+   section as the fallback DoD, and note the gap in your result.
+
+Use **exactly** these enum strings: `role` ∈ the *Canonical agent names* table below plus `po`,
+`ux`, `general` (see the *Data model* `knowledge.role` enum); `kind` ∈ `{profile, kb, learnings,
+standards}`. Enum drift here silently breaks orchestration — do not invent variants.
+
 ## Preferred path — the `sethlans-board` MCP server
 The plugin ships a **stdio MCP server** (`sethlans-board`) that wraps this REST API with typed,
 enum-validated tools. **Prefer the MCP tools** over the raw HTTP/PowerShell recipes: they
@@ -82,6 +113,7 @@ Typical flow with the tools: `sethlans_board_upsert_project` → `sethlans_board
 - **story**: `id, title, desc, status, phase, epic_id, md, md_updated_at` — status ∈ `{todo, progress, done}`, phase ∈ `{analysis, ux, design, dev, done}`
 - **task**: `id, title, status, story_id, agent_id?, md, md_updated_at, tokens` — status ∈ `{todo, progress, done}`
 - **agent**: `id, name, current_task, status, tokens` — status ∈ `{active, idle}`
+- **knowledge**: `id (k########), project_id, role, kind, source, title, md, md_updated_at` — role ∈ `{general, po, seth-architect, ux, seth-tester, seth-frontend, seth-be-python, seth-be-java, seth-fullstack, seth-reviewer, seth-devops}`, kind ∈ `{profile, kb, learnings, standards}`, source ∈ `{claude_md, confluence, jira, code, manual}`. `kind=profile` mirrors CLAUDE.md/config; `kind=kb` is knowledge extracted during pre-training; `kind=learnings` is captured at runtime; `kind=standards` holds the per-role Definition of Done (the quality bar a role's output must meet, distinct from project knowledge). `role`/`kind`/`source` are validated `String` columns (application-level, not a DB enum) — no migration needed to add a new value, only a `models.py` (backend) + `enums.mjs` (preview) update, kept in sync.
 
 `md` is the associated Markdown document (analysis for stories, description +
 architectural choices + work notes for tasks). `md_updated_at` is set by the

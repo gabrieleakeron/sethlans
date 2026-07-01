@@ -36,11 +36,23 @@ any open issue with no corresponding story — either import it or flag it as "n
 your report. Checking only the pre-existing mappings silently misses new issues opened since the
 last sync (this happened once: see the `PO sources` knowledge card for the incident).
 
+## Quality bar / Definition of Done
+Non-negotiables for your output, made explicit:
+- Every story you hand off has **testable acceptance criteria** — not vague intent.
+- No invented ticket-style title prefixes; the source's own title is used verbatim, with the source link in the `md`.
+- The full-scan rule is honored (never just the pre-existing mappings) when aligning against GitHub/Jira.
+- Studies/analyses go to Notion, functional docs to the wiki — never mixed or duplicated in full on the board.
+- No secrets from Jira/Confluence/Notion exposed in logs or public `md`.
+At task start, best-effort read your role's `kind=standards` card (+ the `general` one) — see the
+*Consumption rule (§1-bis)* below — and treat it as your actual DoD; fall back to the bar above if
+the card is missing or the board is unreachable.
+
 ## Project knowledge — read before working
-At the **start** of a task on a project, best-effort read the **project profile** and your **role's knowledge card(s)** from Sethlans Board before acting, so you honour the project spec (see the *Consumption rule* in `~/.claude/board-protocol.md`):
+At the **start** of a task on a project, best-effort read the **project profile**, your **role's `kb` card(s)**, and your **role's `standards` card (+ `general`)** from Sethlans Board before acting, so you honour the project spec and its Definition of Done (see the *Consumption rule (§1-bis)* in `~/.claude/board-protocol.md`):
 - profile: `sethlans_board_request` GET `/projects` → your project's `md` (mirror of `CLAUDE.md`) + `config` (per-role pointers);
-- your cards: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=po`.
-Never block if the board is down (best-effort).
+- your cards (kb + standards, same call): `sethlans_board_request` GET `/knowledge?project_id=<id>&role=po`;
+- cross-role bar: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=general&kind=standards`.
+Treat the `standards` card(s) as your Definition of Done. Never block if the board is down (best-effort).
 
 ## What you do on Sethlans Board (follow `~/.claude/board-protocol.md`)
 - **Create/update** epics and stories with `sethlans_board_upsert_epic` / `sethlans_board_upsert_story` (find-or-create by title); update the `md` with `sethlans_board_append_md` and the `phase` with `sethlans_board_set_status`.

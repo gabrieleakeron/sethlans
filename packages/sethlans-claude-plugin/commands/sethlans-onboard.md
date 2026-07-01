@@ -211,8 +211,11 @@ Build the **project profile** and PATCH it onto `project.md`:
 
 ## 3. Per-role knowledge cards (pre-training) — spawn the role agents
 For each role, spawn the matching subagent with the project id + `SETHLANS_SERVICE_API_URL` and have it
-**study the project and upsert its `knowledge` card(s)** (`role`, `kind=kb`, proper `source`).
-Match-by-title to avoid duplicates; on `--refresh`, reconcile (update `md`, do not duplicate).
+**study the project and upsert its `knowledge` card(s)**: its usual **`kind=kb`** card (`role`,
+proper `source`), **plus its own `kind=standards` card** — the role's *Definition of Done*, i.e.
+the quality bar its own output must meet, distinct from the project knowledge in the `kb` card.
+Match-by-title to avoid duplicates; on `--refresh`, reconcile (update `md`, do not duplicate) —
+for **both** kinds.
 - **seth-product-owner** → card `PO sources`: the Jira project + which epics/stories to import,
   the Confluence space / KB location. If pointers are missing in `config`, discover them via
   the Atlassian MCP and **write them back** to `project.config`.
@@ -224,7 +227,23 @@ Match-by-title to avoid duplicates; on `--refresh`, reconcile (update `md`, do n
 - **seth-tester** → card `Test strategy & environments`: test suites split, how to run them, and
   the available environments (URLs from `config.roles.seth-tester.environments`).
 
-Keep cards **concise and evidence-backed**; never put secrets/tokens into a card.
+### `kind=standards` card — Definition of Done per role
+In the **same spawn**, after (or alongside) the `kb` card, have **every** role agent — PO,
+seth-architect, the dev agents (seth-frontend, seth-be-python, seth-be-java, seth-fullstack),
+seth-tester, seth-reviewer, seth-ux-designer — distill and upsert its own `standards` card:
+`role`, `kind=standards`, title **`Definition of Done — <role>`** (plus a project-wide
+**`Definition of Done — general`** card when a cross-role bar applies), evidence-backed (grounded
+in the repo's actual conventions/checks, not invented), never containing secrets. Match-by-title
+idempotent upsert — same rule as the `kb` card, so `--refresh` reconciles in place without
+duplicating.
+
+**Do not re-derive the distillation logic here** — it is defined once, canonically, by the
+`/sethlans-standards` command (`commands/sethlans-standards.md`); this step only triggers it as
+part of pre-training. Follow that command's spec for what to inspect and how to phrase the card;
+this file stays the trigger point, not a second definition.
+
+Keep cards **concise and evidence-backed**; never put secrets/tokens into a card — this applies to
+**both** `kb` and `standards` cards.
 
 ## 4. Refresh semantics (`--refresh`)
 Use after others changed the project. Recommended: spawn **seth-devops** first to `git pull --ff-only`

@@ -27,7 +27,7 @@ const ROLE_COLOR = {
   ux: "#d67fb0",
   tester: "#3fae5a",
 };
-const KIND_LABELS = { profile: "Profile", kb: "KB", learnings: "Learnings" };
+const KIND_LABELS = { profile: "Profile", kb: "KB", learnings: "Learnings", standards: "Standards" };
 
 function fmtDate(iso) {
   if (!iso) return null;

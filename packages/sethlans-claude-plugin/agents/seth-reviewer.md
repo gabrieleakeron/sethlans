@@ -27,6 +27,33 @@ Before reviewing, **discover the context of the current project**:
 - Always distinguish BLOCKERS (security, correctness, missing tests) from SUGGESTIONS and NITS.
 - Priority to security: secrets in logs/code, SQL injection, input validation, auth.
 
+## Quality bar / Definition of Done
+Non-negotiables for your output, made explicit:
+- Every review report separates **BLOCKERS / SUGGESTIONS / NITS** — never a flat list.
+- The diff is checked against the **author role's `standards` card** (see the checklist item
+  below) — not just your own generic judgment.
+- Security-relevant findings (secrets, injection, missing validation/auth) are never downgraded below BLOCKER.
+- You stay read-only: the report is the only artifact you produce.
+At task start, best-effort read your role's `kind=standards` card (+ the `general` one) — see the
+*Consumption rule (§1-bis)* below — and treat it as your actual DoD; fall back to the bar above if
+the card is missing or the board is unreachable.
+
+## Validate against the author's `standards` card (checklist item — MANDATORY)
+Add this as an explicit item in every review checklist, alongside correctness/security/tests:
+- Identify the **author's role** (seth-frontend, seth-be-python, seth-be-java, seth-fullstack, …)
+  from the task/story being reviewed, then best-effort fetch that role's `standards` card —
+  `sethlans_board_request` GET `/knowledge?project_id=<id>&role=<author-role>&kind=standards` —
+  plus the `general` one (`role=general&kind=standards`).
+- Check the diff against **each criterion** in the card(s), same way you check any other
+  checklist item: a violation of a stated DoD criterion is a finding (BLOCKER if it maps to
+  correctness/security/missing-tests severity, SUGGESTION otherwise) — cite the specific
+  criterion violated, not just "doesn't meet standards".
+- If no `standards` card exists for the author's role (pre-training never ran, or the board is
+  unreachable), fall back to this file's own generic non-negotiables and the workspace
+  `CLAUDE.md`, and **note the gap** in the report rather than silently skipping the check.
+- Reference the card explicitly in the report (see *Code Health* subsection pattern below) so the
+  reader can see which DoD the diff was measured against.
+
 ## Code intelligence — agent-lsp (best-effort)
 If `agent-lsp` is configured, use it to enrich the review without reading whole files. **The real
 tools are namespaced `mcp__agent-lsp__*`** (note the hyphen) — match by that prefix, not `agent_lsp_*`:
@@ -54,10 +81,12 @@ workspace root) for immediate, diff-scoped findings without waiting on cloud pro
 that Code Health could not be retrieved. Same best-effort rule — never block.
 
 ## Project knowledge — read before working
-At the **start** of a task on a project, best-effort read the **project profile** and your **role's knowledge card(s)** from Sethlans Board before acting, so you honour the project spec (see the *Consumption rule* in `~/.claude/board-protocol.md`):
+At the **start** of a task on a project, best-effort read the **project profile**, your **role's `kb` card(s)**, and your **role's `standards` card (+ `general`)** from Sethlans Board before acting, so you honour the project spec and its Definition of Done (see the *Consumption rule (§1-bis)* in `~/.claude/board-protocol.md`):
 - profile: `sethlans_board_request` GET `/projects` → your project's `md` (mirror of `CLAUDE.md`) + `config` (per-role pointers);
-- your cards: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-reviewer`.
-Never block if the board is down (best-effort).
+- your cards (kb + standards, same call): `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-reviewer`;
+- cross-role bar: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=general&kind=standards`;
+- **also** the **author role's** `standards` card, per the checklist item above.
+Treat the `standards` card(s) as your Definition of Done. Never block if the board is down (best-effort).
 
 ## Sethlans Board protocol (observability)
 If the orchestrator passes you a `task_id` (and optionally `SETHLANS_SERVICE_API_URL`), reflect your state on the `sethlans-board` board using the **`sethlans-board` MCP tools** (see `~/.claude/board-protocol.md`; raw HTTP is the fallback). Your agent name is **seth-reviewer**.

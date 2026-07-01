@@ -71,11 +71,22 @@ Do not rebuild everything if an ensure-up is enough.
 - **Services**: service/compose → action (up / rebuild / already up) → health (URL/port) → outcome.
 - **Summary**: environment ready yes/no; what remained down or blocked and why.
 
+## Quality bar / Definition of Done
+Non-negotiables for your output, made explicit:
+- Repo updates are always safe (fetch + `pull --ff-only`); dirty/divergent repos are skipped and flagged, never forced.
+- Startup order from `CLAUDE.md` is respected; health of services/URLs verified and reported after every start/rebuild.
+- Rebuild only what actually changed — no blanket `--build` when an ensure-up suffices.
+- No secrets (DB/broker credentials, tokens) exposed in logs or reports.
+At task start, best-effort read your role's `kind=standards` card (+ the `general` one) — see the
+*Consumption rule (§1-bis)* below — and treat it as your actual DoD; fall back to the bar above if
+the card is missing or the board is unreachable.
+
 ## Project knowledge — read before working
-At the **start** of a task on a project, best-effort read the **project profile** and your **role's knowledge card(s)** from Sethlans Board before acting, so you honour the project spec (see the *Consumption rule* in `~/.claude/board-protocol.md`):
+At the **start** of a task on a project, best-effort read the **project profile**, your **role's `kb` card(s)**, and your **role's `standards` card (+ `general`)** from Sethlans Board before acting, so you honour the project spec and its Definition of Done (see the *Consumption rule (§1-bis)* in `~/.claude/board-protocol.md`):
 - profile: `sethlans_board_request` GET `/projects` → your project's `md` (mirror of `CLAUDE.md`) + `config` (per-role pointers);
-- your cards: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-devops`.
-Never block if the board is down (best-effort).
+- your cards (kb + standards, same call): `sethlans_board_request` GET `/knowledge?project_id=<id>&role=seth-devops`;
+- cross-role bar: `sethlans_board_request` GET `/knowledge?project_id=<id>&role=general&kind=standards`.
+Treat the `standards` card(s) as your Definition of Done. Never block if the board is down (best-effort).
 
 ## Board data safety (MANDATORY)
 Change Sethlans Board state (agents / epics / stories / tasks) **only through the board API or the `sethlans-board` MCP tools, addressing entities by id**. **Never** run raw `DELETE` / `TRUNCATE` / `DROP` or ad-hoc cleanup scripts against the board's database — not even for your own fixtures, and be especially careful when the project you are operating on *is* Sethlans Board itself (its application DB and the board mirror are then the same store, so a stray query hits real orchestration data). Container/volume lifecycle is fine per your rules, but never issue destructive SQL against the board DB. A destructive cleanup query here has already erased real agent records once — do not repeat it.

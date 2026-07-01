@@ -88,8 +88,9 @@ ROLE_KNOWLEDGE = {
     "general", "po", "seth-architect", "ux", "seth-tester",
     "seth-frontend", "seth-be-python", "seth-be-java", "seth-fullstack", "seth-reviewer", "seth-devops",
 }
-# kind: profile = specchio di CLAUDE.md/config; kb = conoscenza estratta; learnings = appresi a runtime.
-KIND_KNOWLEDGE = {"profile", "kb", "learnings"}
+# kind: profile = specchio di CLAUDE.md/config; kb = conoscenza estratta; learnings = appresi a runtime;
+# standards = Definition of Done per-ruolo (criteri di qualita' attesi dal ruolo, non conoscenza di progetto).
+KIND_KNOWLEDGE = {"profile", "kb", "learnings", "standards"}
 # source: da dove proviene il contenuto.
 SOURCE_KNOWLEDGE = {"claude_md", "confluence", "jira", "code", "manual"}
 
